@@ -1,0 +1,7 @@
+.env
+.env.local
+.env.*.local
+.branches
+.temp
+node_modules/
+.DS_Store

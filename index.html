@@ -171,7 +171,11 @@ tbody tr:hover{background:#fafcfd}
     </div>
     <button class="btn pri full" id="signInBtn">Sign in</button>
     <p class="sub" style="margin:16px 0 0;text-align:center;font-size:12.5px">
-      Got an invite code? <button class="linkbtn" id="toSignup">Create your account</button></p>
+      Got an invite code? <button class="linkbtn" id="toSignup">Join your team</button></p>
+    <div style="border-top:1px solid var(--line);margin:16px 0 0;padding-top:14px">
+      <p class="sub" style="margin:0;text-align:center;font-size:12.5px">
+        New here? <button class="linkbtn" id="toOrg">Set up your company</button></p>
+    </div>
   </div>
 </div>
 
@@ -250,6 +254,7 @@ const S = { user:null, org:null, role:null, me:null, tab:'today',
 /* ---------------- auth ---------------- */
 $('#signInBtn').onclick = signIn;
 $('#toSignup').onclick = showSignup;
+$('#toOrg').onclick = showOrgSignup;
 $('#pw').onkeydown = e => { if(e.key==='Enter') signIn(); };
 $('#email').onkeydown = e => { if(e.key==='Enter') $('#pw').focus(); };
 
@@ -288,9 +293,11 @@ function showSignup(){
       <input id="su_pw" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
     <button class="btn pri full" id="su_go">Create account</button>
     <p class="sub" style="margin:16px 0 0;text-align:center;font-size:12.5px">
-      Already have an account? <button class="linkbtn" id="toSignin">Sign in</button></p>
+      Already have an account? <button class="linkbtn" id="toSignin">Sign in</button><br>
+      Setting up a new company? <button class="linkbtn" id="toOrg2">Start here</button></p>
   </div>`;
   $('#toSignin').onclick = () => location.reload();
+  $('#toOrg2').onclick = showOrgSignup;
   $('#su_go').onclick = doSignup;
   $('#su_pw').onkeydown = e => { if(e.key==='Enter') doSignup(); };
 }
@@ -330,6 +337,109 @@ async function doSignup(){
   boot();
 }
 
+
+/* ---------------- new organisation signup ---------------- */
+const COUNTRIES = [
+  ['SG','Singapore','SGD','Asia/Singapore'],
+  ['GB','United Kingdom','GBP','Europe/London'],
+  ['US','United States','USD','America/New_York'],
+  ['AU','Australia','AUD','Australia/Sydney'],
+  ['CA','Canada','CAD','America/Toronto'],
+  ['IN','India','INR','Asia/Kolkata'],
+  ['MY','Malaysia','MYR','Asia/Kuala_Lumpur'],
+  ['PH','Philippines','PHP','Asia/Manila'],
+  ['ID','Indonesia','IDR','Asia/Jakarta'],
+  ['AE','United Arab Emirates','AED','Asia/Dubai'],
+  ['ZA','South Africa','ZAR','Africa/Johannesburg'],
+  ['NZ','New Zealand','NZD','Pacific/Auckland'],
+  ['IE','Ireland','EUR','Europe/Dublin'],
+  ['DE','Germany','EUR','Europe/Berlin'],
+  ['FR','France','EUR','Europe/Paris'],
+  ['NL','Netherlands','EUR','Europe/Amsterdam'],
+  ['ES','Spain','EUR','Europe/Madrid'],
+  ['HK','Hong Kong','HKD','Asia/Hong_Kong'],
+  ['JP','Japan','JPY','Asia/Tokyo'],
+  ['','Somewhere else','USD','UTC']
+];
+
+function showOrgSignup(){
+  $('#login').innerHTML = `<div class="loginCard" style="max-width:440px">
+    <div class="logo">A</div>
+    <h1>Set up your company</h1>
+    <p class="sub">Create an account for your business. You'll be the owner, and you can
+      invite your team afterwards.</p>
+    <div id="ogMsg"></div>
+    <div class="field"><label for="og_org">Company name</label>
+      <input id="og_org" type="text" placeholder="Acme Cafe Pte Ltd"></div>
+    <div class="field"><label for="og_you">Your name</label>
+      <input id="og_you" type="text" placeholder="Jane Doe"></div>
+    <div class="field"><label for="og_country">Country</label>
+      <select id="og_country">${COUNTRIES.map(([c,n])=>
+        `<option value="${c}">${esc(n)}</option>`).join('')}</select></div>
+    <div class="grid2">
+      <div class="field"><label for="og_cur">Currency</label>
+        <input id="og_cur" type="text" value="SGD" maxlength="3" style="text-transform:uppercase"></div>
+      <div class="field"><label for="og_hours">Standard week (hrs)</label>
+        <input id="og_hours" type="number" value="38" min="1" max="80" step="0.5"></div>
+    </div>
+    <div class="field"><label for="og_email">Your email</label>
+      <input id="og_email" type="email" autocomplete="username" placeholder="you@company.com"></div>
+    <div class="field"><label for="og_pw">Choose a password</label>
+      <input id="og_pw" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
+    <button class="btn pri full" id="og_go">Create company account</button>
+    <p class="sub" style="margin:16px 0 0;text-align:center;font-size:12.5px">
+      Already have an account? <button class="linkbtn" id="og_back">Sign in</button></p>
+  </div>`;
+
+  $('#og_country').onchange = () => {
+    const c = COUNTRIES.find(x=>x[0]===$('#og_country').value);
+    if(c) $('#og_cur').value = c[2];
+  };
+  $('#og_back').onclick = () => location.reload();
+  $('#og_go').onclick = doOrgSignup;
+  $('#og_pw').onkeydown = e => { if(e.key==='Enter') doOrgSignup(); };
+}
+
+async function doOrgSignup(){
+  const box=$('#ogMsg'), btn=$('#og_go');
+  const err = m => { box.innerHTML = `<div class="msg err">${esc(m)}</div>`;
+                     btn.disabled=false; btn.textContent='Create company account'; };
+  box.innerHTML='';
+  const org=$('#og_org').value.trim(), you=$('#og_you').value.trim();
+  const email=$('#og_email').value.trim(), pw=$('#og_pw').value;
+  const cc=$('#og_country').value, cur=$('#og_cur').value.trim().toUpperCase();
+  const hours=parseFloat($('#og_hours').value)||38;
+
+  if(!org){ err('Enter your company name.'); return; }
+  if(!you){ err('Enter your name.'); return; }
+  if(!email){ err('Enter your email.'); return; }
+  if(pw.length<8){ err('Password must be at least 8 characters.'); return; }
+  if(cur.length!==3){ err('Currency should be a 3-letter code, like SGD.'); return; }
+
+  btn.disabled=true; btn.textContent='Creating…';
+
+  const { error: suErr } = await db.auth.signUp({ email, password: pw });
+  if(suErr){
+    const { error: siErr } = await db.auth.signInWithPassword({ email, password: pw });
+    if(siErr){ err(suErr.message); return; }
+  }
+  const { data:{ session } } = await db.auth.getSession();
+  if(!session){
+    err('Account created. Please confirm your email, then sign in to finish setting up.');
+    return;
+  }
+
+  const tz = COUNTRIES.find(x=>x[0]===cc)?.[3]
+    || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const { error } = await db.rpc('dh_create_org', {
+    p_name: org, p_country: cc || 'US', p_currency: cur,
+    p_timezone: tz, p_owner_name: you, p_hours: hours
+  });
+  if(error){ err(error.message); return; }
+  toast('Welcome to Attenda');
+  boot();
+}
+
 /* ---------------- boot ---------------- */
 async function boot(){
   const { data:{ user } } = await db.auth.getUser();
@@ -356,6 +466,8 @@ async function boot(){
         <div class="field"><label for="rd_code">Invite code</label>
           <input id="rd_code" type="text" placeholder="ABCD-1234" autocapitalize="characters"></div>
         <button class="btn pri full" id="rd_go" style="margin-top:10px">Join</button>
+        <p class="hint" style="margin-top:14px;text-align:center">
+          No code? <button class="linkbtn" id="rd_org">Set up your own company instead</button></p>
       </div></div>`;
     const go = async () => {
       const c = $('#rd_code').value.trim();
@@ -366,6 +478,7 @@ async function boot(){
     };
     $('#rd_go').onclick = go;
     $('#rd_code').onkeydown = e => { if(e.key==='Enter') go(); };
+    $('#rd_org').onclick = () => { $('#app').style.display='none'; showOrgSignup(); $('#login').style.display='grid'; };
     return;
   }
 
@@ -502,7 +615,10 @@ function modal(title, bodyHTML, footHTML){
   $('#modalbg').classList.add('on');
 }
 function closeModal(){ $('#modalbg').classList.remove('on'); $('#modal').innerHTML=''; }
-$('#modalbg').addEventListener('click', e => { if(e.target.id==='modalbg') closeModal(); });
+$('#modalbg').addEventListener('click', e => {
+  if(e.target.id==='modalbg') { closeModal(); return; }
+  if(e.target.closest('[data-close]')) { closeModal(); return; }
+});
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
 
 const fld = (id,label,val,type,extra) =>
@@ -584,7 +700,7 @@ function memberForm(m){
     `${m ? `<button class="btn bad" id="m_del">Remove</button>
             <button class="btn" id="m_sched">Weekly pattern</button>` : ''}
      <div class="spacer"></div>
-     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" data-close="1">Cancel</button>
      <button class="btn pri" id="m_save">${m?'Save':'Add member'}</button>`);
 
   $('#m_save').onclick = async () => {
@@ -663,7 +779,7 @@ async function scheduleForm(m){
     </div>`,
     `${existing ? `<button class="btn bad" id="sc_del">Remove pattern</button>` : ''}
      <div class="spacer"></div>
-     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" data-close="1">Cancel</button>
      <button class="btn" id="sc_save">Save pattern</button>
      <button class="btn pri" id="sc_gen">Save &amp; generate</button>`);
 
@@ -715,7 +831,7 @@ function confirmRemove(m){
     <p style="font-size:13.5px;line-height:1.6;color:var(--muted);margin-top:8px">
       If they have no history at all, the record is deleted outright.</p>`,
     `<div class="spacer"></div>
-     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" data-close="1">Cancel</button>
      <button class="btn bad" id="r_go">Remove</button>`);
   $('#r_go').onclick = async () => {
     const { data, error } = await db.rpc('dh_remove_member', { p_member: m.id });
@@ -739,11 +855,50 @@ async function inviteFor(memberId, name){
       <input value="${esc(url)}" readonly onclick="this.select()"></div>`,
     `<div class="spacer"></div>
      <button class="btn" id="i_copy">Copy message</button>
-     <button class="btn pri" onclick="closeModal()">Done</button>`);
+     <button class="btn pri" data-close="1">Done</button>`);
   $('#i_copy').onclick = () => {
     const msg = `Hi ${name}, here's your Attenda login.\n\n${url}\n\nChoose "Create account", set a password, then enter this code:\n${data}`;
     navigator.clipboard.writeText(msg).then(
       ()=>toast('Message copied'), ()=>toast('Copy failed — select the code manually', true));
+  };
+}
+
+
+function orgForm(){
+  modal('Organisation settings', `
+    ${fld('o_name','Company name', S.org.name)}
+    <div class="grid2">
+      ${sel('o_country','Country', S.org.country_code,
+        COUNTRIES.filter(c=>c[0]).map(c=>[c[0],c[1]]))}
+      ${fld('o_cur','Currency', S.org.currency_code, 'text', 'maxlength="3" style="text-transform:uppercase"')}
+    </div>
+    <div class="grid2">
+      ${fld('o_tz','Timezone', S.org.timezone)}
+      ${fld('o_hours','Standard week (hours)', S.org.hours_per_week, 'number', 'min="1" max="80" step="0.5"')}
+    </div>
+    <p class="hint">Standard hours convert hourly pay into a monthly figure on the Costs tab.
+      Changing the country does not re-seed contributions — edit those directly above.</p>`,
+    `<div class="spacer"></div>
+     <button class="btn" data-close="1">Cancel</button>
+     <button class="btn pri" id="o_save">Save</button>`);
+
+  $('#o_country').onchange = () => {
+    const c = COUNTRIES.find(x=>x[0]===$('#o_country').value);
+    if(c){ $('#o_cur').value = c[2]; $('#o_tz').value = c[3]; }
+  };
+  $('#o_save').onclick = async () => {
+    const { error } = await db.rpc('dh_update_org', {
+      p_name: V('o_name'), p_country: V('o_country'),
+      p_currency: V('o_cur').toUpperCase(), p_timezone: V('o_tz'),
+      p_hours: parseFloat(V('o_hours'))||38
+    });
+    if(error){ toast(error.message, true); return; }
+    toast('Organisation updated'); closeModal();
+    const { data:ou } = await db.from('dh_org_users')
+      .select('dh_orgs(id,name,country_code,currency_code,timezone,hours_per_week)').limit(1).maybeSingle();
+    if(ou?.dh_orgs){ S.org = ou.dh_orgs;
+      $('#orgline').textContent = `${S.org.name} · ${S.org.country_code} · ${S.org.currency_code}`; }
+    refresh();
   };
 }
 
@@ -770,7 +925,7 @@ function contribForm(c){
     These are your own figures — confirm them with your local authority.</p>`,
     `${c ? `<button class="btn bad" id="c_del">Delete</button>` : ''}
      <div class="spacer"></div>
-     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" data-close="1">Cancel</button>
      <button class="btn pri" id="c_save">${c?'Save':'Add'}</button>`);
 
   $('#c_save').onclick = async () => {
@@ -803,7 +958,7 @@ function locForm(l){
     <button class="linkbtn" id="l_here">Use my current location</button></p>`,
     `${l ? `<button class="btn bad" id="l_del">Delete</button>` : ''}
      <div class="spacer"></div>
-     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" data-close="1">Cancel</button>
      <button class="btn pri" id="l_save">${l?'Save':'Add'}</button>`);
 
   $('#l_here').onclick = async () => {
@@ -835,7 +990,7 @@ function leaveTypeForm(t){
     </div>`,
     `${t ? `<button class="btn bad" id="t_del">Delete</button>` : ''}
      <div class="spacer"></div>
-     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" data-close="1">Cancel</button>
      <button class="btn pri" id="t_save">${t?'Save':'Add'}</button>`);
 
   $('#t_save').onclick = async () => {
@@ -865,7 +1020,7 @@ function shiftForm(){
     ${fld('s_break','Unpaid break (minutes)', 0, 'number', 'min="0"')}
     <p class="hint">Times are in ${esc(S.org.timezone||'your local timezone')}.</p>`,
     `<div class="spacer"></div>
-     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" data-close="1">Cancel</button>
      <button class="btn pri" id="s_save">Schedule</button>`);
 
   $('#s_save').onclick = async () => {
@@ -941,7 +1096,7 @@ function vSetup(){
     <div><div class="k">Timezone</div><div style="font-weight:600;margin-top:4px">${esc(S.org.timezone)}</div></div>
     <div><div class="k">Standard week</div><div style="font-weight:600;margin-top:4px">${S.org.hours_per_week} hours</div></div>
   </div>
-  <p class="hint" style="margin-top:12px">Organisation settings are changed in the Supabase dashboard for now.</p>
+  <div class="row" style="margin-top:14px"><button class="btn pri" data-add="org">Edit organisation</button></div>
   </div></div>`;
 }
 
@@ -1163,6 +1318,7 @@ $('#view').addEventListener('click', e => {
     if(k==='loc')     locForm(null);
     if(k==='ltype')   leaveTypeForm(null);
     if(k==='shift')   shiftForm();
+    if(k==='org')     orgForm();
     return;
   }
   const em = e.target.closest('[data-editmem]');

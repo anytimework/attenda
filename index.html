@@ -130,6 +130,16 @@ tbody tr:hover{background:#fafcfd}
 .modal .mfoot .spacer{flex:1}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 @media(max-width:520px){.grid2{grid-template-columns:1fr}}
+.secthead{font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;
+  letter-spacing:.6px;margin:16px 0 9px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+.secthead:first-child{margin-top:0}
+.switchrow{display:flex;align-items:center;gap:9px;margin-top:10px;cursor:pointer;font-size:13.5px}
+.switchrow input{width:17px;height:17px;accent-color:var(--brand);cursor:pointer}
+.dowrow{display:flex;gap:5px;flex-wrap:wrap}
+.dow{padding:8px 11px;border:1px solid var(--line);border-radius:8px;background:var(--card);
+  font-size:12.5px;font-weight:600;color:var(--muted);min-width:46px}
+.dow.on{background:var(--brandSoft);border-color:var(--brand);color:var(--brand)}
+.field textarea{width:100%}
 .codebox{background:var(--brandSoft);border:1px dashed var(--brand);border-radius:10px;
   padding:16px;text-align:center;margin:10px 0}
 .codebox .c{font-family:'DM Mono',monospace;font-size:26px;font-weight:500;
@@ -235,7 +245,7 @@ function toast(msg, isErr){
 /* ---------------- state ---------------- */
 const S = { user:null, org:null, role:null, me:null, tab:'today',
             shifts:[], members:[], leave:[], contributions:[], locations:[],
-            leaveTypes:[], openEntry:null, balances:[] };
+            leaveTypes:[], overrides:[], openEntry:null, balances:[] };
 
 /* ---------------- auth ---------------- */
 $('#signInBtn').onclick = signIn;
@@ -413,6 +423,7 @@ async function refresh(){
     q.push(db.from('dh_contributions').select('*').eq('org_id',org).order('sort_order'));
     q.push(db.from('dh_locations').select('*').eq('org_id',org).order('name'));
     q.push(db.from('dh_leave_types').select('*').eq('org_id',org).order('name'));
+    q.push(db.from('dh_member_leave_overrides').select('*'));
   }
 
   const res = await Promise.all(q);
@@ -427,6 +438,7 @@ async function refresh(){
   S.contributions = isMgr() ? (res[4].data || []) : [];
   S.locations = isMgr() ? (res[5].data || []) : [];
   S.leaveTypes = isMgr() ? (res[6].data || []) : [];
+  S.overrides  = isMgr() ? (res[7].data || []) : [];
 
   if(S.me){
     const { data:bal } = await db.from('dh_leave_balances')
@@ -512,12 +524,23 @@ async function run(promise, okMsg){
 /* ---------------- people ---------------- */
 function memberForm(m){
   const locs = [['','— none —'], ...S.locations.map(l=>[l.id,l.name])];
-  modal(m ? 'Edit member' : 'Add member', `
+  const ovr = S.overrides || [];
+  const ovrFor = t => { const o = ovr.find(x=>x.member_id===m?.id && x.leave_type_id===t.id);
+                        return o ? o.days_allowed : ''; };
+  modal(m ? 'Edit '+m.full_name : 'Add member', `
+    <div class="secthead">Person</div>
     ${fld('f_name','Full name', m?.full_name, 'text', 'placeholder="Jane Doe"')}
     <div class="grid2">
+      ${fld('f_mobile','Mobile', m?.mobile, 'tel', 'placeholder="+65 9123 4567"')}
       ${fld('f_email','Email', m?.email, 'email', 'placeholder="jane@example.com"')}
-      ${fld('f_title','Job title', m?.job_title, 'text', 'placeholder="Barista"')}
     </div>
+    <div class="grid2">
+      ${fld('f_title','Job title', m?.job_title, 'text', 'placeholder="Barista"')}
+      ${sel('f_loc','Location', m?.primary_location_id||'', locs)}
+    </div>
+    ${fld('f_photo','Photo URL', m?.photo_url, 'url', 'placeholder="https://…  (optional)"')}
+
+    <div class="secthead">Employment &amp; pay</div>
     <div class="grid2">
       ${sel('f_type','Employment', m?.employment_type||'full_time',
         [['full_time','Full time'],['part_time','Part time'],['casual','Casual'],['contract','Contract']])}
@@ -526,13 +549,40 @@ function memberForm(m){
     </div>
     <div class="grid2">
       ${fld('f_rate','Pay rate ('+sym().trim()+')', m?.pay_rate ?? 0, 'number', 'min="0" step="0.01"')}
-      ${sel('f_loc','Location', m?.primary_location_id||'', locs)}
+      ${fld('f_salary','Fixed monthly salary', m?.monthly_salary ?? '', 'number', 'min="0" step="0.01" placeholder="optional"')}
     </div>
-    ${m ? sel('f_status','Status', m.status,
-        [['active','Active'],['invited','Invited'],['suspended','Suspended'],['offboarded','Offboarded']]) : ''}
-    <p class="hint" style="margin-top:6px">
-      ${m ? 'Changes apply immediately.' : 'After saving you can issue an invite code so they can set up their own login.'}</p>`,
-    `${m ? `<button class="btn bad" id="m_del">Remove</button>` : ''}
+    <p class="hint">A fixed monthly salary overrides the pay rate when costs are calculated.
+      Leave it blank for straightforward hourly or monthly staff.</p>
+    <label class="switchrow">
+      <input type="checkbox" id="f_ot" ${m?.ot_eligible?'checked':''}>
+      <span>Eligible for overtime</span>
+    </label>
+    <div class="grid2" style="margin-top:10px">
+      ${fld('f_start','Started on', m?.started_on || new Date().toISOString().slice(0,10), 'date')}
+      ${m ? sel('f_status','Status', m.status,
+        [['active','Active'],['invited','Invited'],['suspended','Suspended'],['offboarded','Offboarded']])
+        : '<div></div>'}
+    </div>
+
+    ${m && S.leaveTypes.length ? `
+    <div class="secthead">Leave allowance</div>
+    <p class="hint" style="margin:0 0 8px">Blank uses the organisation default.</p>
+    <div class="grid2">
+    ${S.leaveTypes.map(t=>`<div class="field">
+      <label for="lv_${t.id}">${esc(t.name)} <span class="meta">(default ${t.days_per_year})</span></label>
+      <input id="lv_${t.id}" type="number" min="0" step="0.5" value="${ovrFor(t)}" placeholder="${t.days_per_year}">
+    </div>`).join('')}
+    </div>` : ''}
+
+    ${m ? `<div class="secthead">Notes</div>
+    <div class="field"><textarea id="f_notes" rows="2"
+      style="padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13.5px"
+      placeholder="Anything worth remembering">${esc(m.notes||'')}</textarea></div>` : ''}
+
+    ${!m ? '<p class="hint" style="margin-top:10px">After saving you\'ll get an invite code to send them.</p>' : ''}`,
+
+    `${m ? `<button class="btn bad" id="m_del">Remove</button>
+            <button class="btn" id="m_sched">Weekly pattern</button>` : ''}
      <div class="spacer"></div>
      <button class="btn" onclick="closeModal()">Cancel</button>
      <button class="btn pri" id="m_save">${m?'Save':'Add member'}</button>`);
@@ -540,23 +590,120 @@ function memberForm(m){
   $('#m_save').onclick = async () => {
     if(!V('f_name')){ toast('Name is required', true); return; }
     const row = {
-      full_name: V('f_name'), email: V('f_email')||null, job_title: V('f_title')||null,
+      full_name: V('f_name'), mobile: V('f_mobile')||null, email: V('f_email')||null,
+      job_title: V('f_title')||null, photo_url: V('f_photo')||null,
       employment_type: V('f_type'), pay_basis: V('f_basis'),
       pay_rate: parseFloat(V('f_rate'))||0,
+      monthly_salary: V('f_salary') ? parseFloat(V('f_salary')) : null,
+      ot_eligible: $('#f_ot')?.checked || false,
+      started_on: V('f_start') || null,
       primary_location_id: V('f_loc')||null
     };
     if(m){
       row.status = V('f_status');
-      await run(db.from('dh_members').update(row).eq('id',m.id), 'Member updated');
+      row.notes  = V('f_notes')||null;
+      const { error } = await db.from('dh_members').update(row).eq('id',m.id);
+      if(error){ toast(error.message, true); return; }
+      // leave overrides
+      for(const t of S.leaveTypes){
+        const el = $('#lv_'+t.id); if(!el) continue;
+        const raw = el.value.trim();
+        const { error:e2 } = await db.rpc('dh_set_leave_override', {
+          p_member: m.id, p_type: t.id, p_days: raw==='' ? null : parseFloat(raw)
+        });
+        if(e2){ toast(e2.message, true); return; }
+      }
+      toast('Member updated'); closeModal(); refresh();
     } else {
-      row.org_id = S.org.id; row.status = 'invited'; row.started_on = new Date().toISOString().slice(0,10);
+      row.org_id = S.org.id; row.status = 'invited';
       const { data, error } = await db.from('dh_members').insert(row).select().single();
       if(error){ toast(error.message, true); return; }
       closeModal(); await refresh();
       inviteFor(data.id, data.full_name);
     }
   };
-  if(m) $('#m_del').onclick = () => confirmRemove(m);
+  if(m){
+    $('#m_del').onclick   = () => confirmRemove(m);
+    $('#m_sched').onclick = () => scheduleForm(m);
+  }
+}
+
+/* ---------------- recurring weekly pattern ---------------- */
+const DOW = [[1,'Mon'],[2,'Tue'],[3,'Wed'],[4,'Thu'],[5,'Fri'],[6,'Sat'],[7,'Sun']];
+
+async function scheduleForm(m){
+  const { data:existing } = await db.from('dh_fixed_schedules')
+    .select('*').eq('member_id', m.id).eq('is_active', true).maybeSingle();
+  const days = existing?.days || [1,2,3,4,5];
+  const locs = [['','— none —'], ...S.locations.map(l=>[l.id,l.name])];
+
+  modal('Weekly pattern — '+m.full_name, `
+    <p class="hint" style="margin:0 0 12px">Set the days and times this person normally works,
+      then generate real shifts from it. Dates that already have a shift are skipped.</p>
+    <div class="field"><label>Days</label>
+      <div class="dowrow">${DOW.map(([n,l])=>`
+        <button type="button" class="dow${days.includes(n)?' on':''}" data-dow="${n}">${l}</button>`).join('')}</div>
+    </div>
+    <div class="grid2">
+      ${fld('sc_start','Starts', existing?.start_time?.slice(0,5) || '09:00', 'time')}
+      ${fld('sc_end','Ends', existing?.end_time?.slice(0,5) || '17:00', 'time')}
+    </div>
+    <div class="grid2">
+      ${fld('sc_break','Unpaid break (mins)', existing?.break_mins ?? 0, 'number', 'min="0"')}
+      ${sel('sc_loc','Location', existing?.location_id || m.primary_location_id || '', locs)}
+    </div>
+    <div class="grid2">
+      ${fld('sc_from','Pattern starts', existing?.starts_on || new Date().toISOString().slice(0,10), 'date')}
+      ${fld('sc_until','Pattern ends', existing?.ends_on || '', 'date', 'placeholder="optional"')}
+    </div>
+    <div class="secthead">Generate shifts</div>
+    <div class="grid2">
+      ${fld('g_from','From', new Date().toISOString().slice(0,10), 'date')}
+      ${fld('g_to','To', new Date(Date.now()+27*864e5).toISOString().slice(0,10), 'date')}
+    </div>`,
+    `${existing ? `<button class="btn bad" id="sc_del">Remove pattern</button>` : ''}
+     <div class="spacer"></div>
+     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn" id="sc_save">Save pattern</button>
+     <button class="btn pri" id="sc_gen">Save &amp; generate</button>`);
+
+  const picked = new Set(days);
+  $('#modal').querySelectorAll('[data-dow]').forEach(b=>{
+    b.onclick = () => { const n=+b.dataset.dow;
+      if(picked.has(n)) picked.delete(n); else picked.add(n);
+      b.classList.toggle('on'); };
+  });
+
+  const savePattern = async () => {
+    if(!picked.size){ toast('Pick at least one day', true); return null; }
+    const row = {
+      org_id:S.org.id, member_id:m.id, location_id:V('sc_loc')||null,
+      days:[...picked].sort(), start_time:V('sc_start'), end_time:V('sc_end'),
+      break_mins:parseInt(V('sc_break'))||0,
+      starts_on:V('sc_from'), ends_on:V('sc_until')||null, is_active:true
+    };
+    const q = existing
+      ? db.from('dh_fixed_schedules').update(row).eq('id',existing.id)
+      : db.from('dh_fixed_schedules').insert(row);
+    const { error } = await q;
+    if(error){ toast(error.message, true); return null; }
+    return true;
+  };
+
+  $('#sc_save').onclick = async () => {
+    if(await savePattern()){ toast('Pattern saved'); closeModal(); refresh(); }
+  };
+  $('#sc_gen').onclick = async () => {
+    if(!await savePattern()) return;
+    const { data, error } = await db.rpc('dh_generate_shifts', {
+      p_member:m.id, p_from:V('g_from'), p_to:V('g_to')
+    });
+    if(error){ toast(error.message, true); return; }
+    toast(data ? `${data} shift${data===1?'':'s'} created` : 'No new shifts — already scheduled');
+    closeModal(); refresh();
+  };
+  if(existing) $('#sc_del').onclick = async () =>
+    run(db.from('dh_fixed_schedules').delete().eq('id',existing.id), 'Pattern removed');
 }
 
 function confirmRemove(m){
@@ -609,7 +756,17 @@ function contribForm(c){
       ${fld('c_er','Employer share', c?.employer_value ?? 0, 'number', 'min="0" step="0.0001"')}
       ${fld('c_ee','Employee share', c?.employee_value ?? 0, 'number', 'min="0" step="0.0001"')}
     </div>
+    <div class="secthead">Limits</div>
+    <div class="grid2">
+      ${fld('c_floor','Minimum amount', c?.floor_amount ?? '', 'number', 'min="0" step="0.01" placeholder="none"')}
+      ${fld('c_cap','Maximum amount', c?.cap_amount ?? '', 'number', 'min="0" step="0.01" placeholder="none"')}
+    </div>
+    <div class="grid2">
+      ${fld('c_minb','Applies from salary', c?.min_base ?? '', 'number', 'min="0" step="0.01" placeholder="any"')}
+      ${fld('c_maxb','Applies up to salary', c?.max_base ?? '', 'number', 'min="0" step="0.01" placeholder="any"')}
+    </div>
     <p class="hint">Percentages are of the monthly base. Fixed amounts are in ${esc(S.org.currency_code)}.
+    Use the limits for schemes that cap the contribution or only apply within a salary band.
     These are your own figures — confirm them with your local authority.</p>`,
     `${c ? `<button class="btn bad" id="c_del">Delete</button>` : ''}
      <div class="spacer"></div>
@@ -618,8 +775,11 @@ function contribForm(c){
 
   $('#c_save').onclick = async () => {
     if(!V('c_name')){ toast('Name is required', true); return; }
+    const num = id => V(id)==='' ? null : parseFloat(V(id));
     const row = { name:V('c_name'), basis:V('c_basis'),
-      employer_value: parseFloat(V('c_er'))||0, employee_value: parseFloat(V('c_ee'))||0 };
+      employer_value: parseFloat(V('c_er'))||0, employee_value: parseFloat(V('c_ee'))||0,
+      cap_amount:num('c_cap'), floor_amount:num('c_floor'),
+      min_base:num('c_minb'), max_base:num('c_maxb') };
     if(c) await run(db.from('dh_contributions').update(row).eq('id',c.id), 'Contribution updated');
     else { row.org_id=S.org.id; row.sort_order=S.contributions.length+1;
       await run(db.from('dh_contributions').insert(row), 'Contribution added'); }
@@ -749,11 +909,14 @@ function vSetup(){
     <div class="spacer"></div><button class="btn pri" data-add="contrib">Add contribution</button>
     <p>Statutory and voluntary contributions. Seeded from ${esc(S.org.country_code)} when the
     organisation was created — rename, adjust or delete them to match your obligations.</p></div>
-  ${S.contributions.length ? `<div class="tscroll"><table><thead><tr><th>Name</th><th>Basis</th><th>Employer</th><th>Employee</th><th></th></tr></thead><tbody>
+  ${S.contributions.length ? `<div class="tscroll"><table><thead><tr><th>Name</th><th>Basis</th><th>Employer</th><th>Employee</th><th>Limits</th><th></th></tr></thead><tbody>
   ${S.contributions.map(c=>`<tr><td class="name">${esc(c.name)}</td>
     <td>${c.basis==='percent'?'% of salary':'Fixed'}</td>
     <td class="mono">${c.basis==='percent'?Number(c.employer_value)+'%':money(c.employer_value)}</td>
     <td class="mono">${c.basis==='percent'?Number(c.employee_value)+'%':money(c.employee_value)}</td>
+    <td class="meta">${[c.floor_amount?'min '+money(c.floor_amount):null,
+        c.cap_amount?'max '+money(c.cap_amount):null,
+        (c.min_base||c.max_base)?'band':null].filter(Boolean).join(' · ')||'—'}</td>
     <td><button class="linkbtn" data-editcon="${c.id}">Edit</button></td></tr>`).join('')}
   </tbody></table></div>` : '<div class="empty"><b>No contributions</b>Costs will show salary only.</div>'}
   </div>
@@ -877,12 +1040,14 @@ function vTeam(){
   if(!S.members.length) return `<div class="panel">${head}<div class="empty">
     <b>No members yet</b>Add your first employee to get started.</div></div>`;
   return `<div class="panel">${head}
-  <div class="tscroll"><table><thead><tr><th>Member</th><th>Type</th><th>Pay</th><th>Location</th><th>Status</th><th></th></tr></thead><tbody>
+  <div class="tscroll"><table><thead><tr><th>Member</th><th>Contact</th><th>Type</th><th>Pay</th><th>Location</th><th>Status</th><th></th></tr></thead><tbody>
   ${S.members.map(m=>`<tr>
     <td><div class="rowflex"><div class="av">${initials(m.full_name)}</div>
       <div><div class="name">${esc(m.full_name)}</div><div class="meta">${esc(m.job_title||'')}</div></div></div></td>
-    <td>${esc((m.employment_type||'').replace('_',' '))}</td>
-    <td class="mono">${money(m.pay_rate)}<span class="meta">${m.pay_basis==='hourly'?' /hr':m.pay_basis==='annual'?' /yr':' /mo'}</span></td>
+    <td class="meta">${esc(m.mobile||m.email||'—')}</td>
+    <td>${esc((m.employment_type||'').replace('_',' '))}${m.ot_eligible?' <span class="pill blue" style="margin-left:4px">OT</span>':''}</td>
+    <td class="mono">${m.monthly_salary ? money(m.monthly_salary)+'<span class="meta"> /mo</span>'
+      : money(m.pay_rate)+`<span class="meta">${m.pay_basis==='hourly'?' /hr':m.pay_basis==='annual'?' /yr':' /mo'}</span>`}</td>
     <td>${esc(m.dh_locations?.name||'—')}</td>
     <td>${m.status==='active'?'<span class="pill good">Active</span>'
       :m.status==='invited'?'<span class="pill warn">Invited</span>'

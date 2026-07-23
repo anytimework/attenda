@@ -185,11 +185,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
    Never put the service_role key here.
    ============================================================ */
 const SUPABASE_URL  = 'https://gdfxysfcramcqajccxlq.supabase.co';
-let SUPABASE_ANON = localStorage.getItem('attenda.key') || '';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkZnh5c2ZjcmFtY3FhamNjeGxxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3OTI4MjYsImV4cCI6MjEwMDM2ODgyNn0.R86dkqEXYKy2mPOGl6wmcdisCIX3IZSEnnGa4C4BFIc';
 
-const db = SUPABASE_ANON ? createClient(SUPABASE_URL, SUPABASE_ANON, {
+const db = createClient(SUPABASE_URL, SUPABASE_ANON, {
   auth:{ persistSession:true, autoRefreshToken:true, storageKey:'attenda.auth' }
-}) : null;
+});
 
 /* ---------------- helpers ---------------- */
 const $ = s => document.querySelector(s);
@@ -585,39 +585,7 @@ $('#view').addEventListener('click', e => {
 });
 
 /* ---------------- start ---------------- */
-function askForKey(){
-  $('#login').style.display='grid';
-  $('#login').innerHTML = `<div class="loginCard">
-    <div class="logo">A</div>
-    <h1>Connect Attenda</h1>
-    <p class="sub">Paste your Supabase anon key to finish setup. It's stored in this browser only, and you'll only do this once.</p>
-    <div id="keyMsg"></div>
-    <div class="field">
-      <label for="keyIn">Anon public key</label>
-      <input id="keyIn" type="text" placeholder="eyJhbGciOi..." autocomplete="off" spellcheck="false">
-    </div>
-    <button class="btn pri full" id="saveKey">Save and continue</button>
-    <p class="sub" style="margin:16px 0 0;font-size:12px">
-      Supabase &rarr; Project Settings &rarr; API Keys &rarr; copy the <b>anon public</b> key.</p>
-  </div>`;
-  const go = () => {
-    const k = $('#keyIn').value.trim();
-    if(!k.startsWith('eyJ') || k.length < 100){
-      $('#keyMsg').innerHTML = '<div class="msg err">That doesn\'t look like an anon key. It should start with eyJ and be quite long.</div>';
-      return;
-    }
-    localStorage.setItem('attenda.key', k);
-    location.reload();
-  };
-  $('#saveKey').onclick = go;
-  $('#keyIn').onkeydown = e => { if(e.key==='Enter') go(); };
-}
-
-if(!SUPABASE_ANON){
-  askForKey();
-} else {
-  boot();
-}
+boot();
 </script>
 </body>
 </html>

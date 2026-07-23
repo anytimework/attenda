@@ -118,6 +118,26 @@ tbody tr:hover{background:#fafcfd}
 .toast.on{transform:translateX(-50%) translateY(0);opacity:1}
 .toast.err{background:var(--bad)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.modalbg{position:fixed;inset:0;background:rgba(16,35,45,.45);display:none;
+  place-items:center;z-index:80;padding:18px;overflow-y:auto}
+.modalbg.on{display:grid}
+.modal{background:var(--card);border-radius:14px;width:100%;max-width:480px;
+  box-shadow:0 12px 40px rgba(0,0,0,.22);max-height:90vh;display:flex;flex-direction:column}
+.modal h3{font-size:16px;font-weight:700;padding:17px 18px 0}
+.modal .mbody{padding:16px 18px;overflow-y:auto}
+.modal .mfoot{padding:13px 18px;border-top:1px solid var(--line);
+  display:flex;gap:9px;justify-content:flex-end;flex-wrap:wrap}
+.modal .mfoot .spacer{flex:1}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+@media(max-width:520px){.grid2{grid-template-columns:1fr}}
+.codebox{background:var(--brandSoft);border:1px dashed var(--brand);border-radius:10px;
+  padding:16px;text-align:center;margin:10px 0}
+.codebox .c{font-family:'DM Mono',monospace;font-size:26px;font-weight:500;
+  letter-spacing:2px;color:var(--brand);user-select:all}
+.linkbtn{background:none;border:none;color:var(--blue);font-size:12.5px;
+  font-weight:600;cursor:pointer;padding:2px 4px}
+.linkbtn:hover{text-decoration:underline}
+.linkbtn.danger{color:var(--bad)}
 .foot{font-size:11.5px;color:var(--faint);line-height:1.6;margin-top:14px;
   padding:12px 14px;background:var(--card);border:1px solid var(--line);border-radius:10px}
 </style>
@@ -140,6 +160,8 @@ tbody tr:hover{background:#fafcfd}
       <input id="pw" type="password" autocomplete="current-password" placeholder="••••••••">
     </div>
     <button class="btn pri full" id="signInBtn">Sign in</button>
+    <p class="sub" style="margin:16px 0 0;text-align:center;font-size:12.5px">
+      Got an invite code? <button class="linkbtn" id="toSignup">Create your account</button></p>
   </div>
 </div>
 
@@ -173,6 +195,7 @@ tbody tr:hover{background:#fafcfd}
   </div>
 </div>
 
+<div class="modalbg" id="modalbg"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
@@ -211,10 +234,12 @@ function toast(msg, isErr){
 
 /* ---------------- state ---------------- */
 const S = { user:null, org:null, role:null, me:null, tab:'today',
-            shifts:[], members:[], leave:[], contributions:[], openEntry:null, balances:[] };
+            shifts:[], members:[], leave:[], contributions:[], locations:[],
+            leaveTypes:[], openEntry:null, balances:[] };
 
 /* ---------------- auth ---------------- */
 $('#signInBtn').onclick = signIn;
+$('#toSignup').onclick = showSignup;
 $('#pw').onkeydown = e => { if(e.key==='Enter') signIn(); };
 $('#email').onkeydown = e => { if(e.key==='Enter') $('#pw').focus(); };
 
@@ -237,6 +262,64 @@ $('#signOutBtn').onclick = async () => {
   location.reload();
 };
 
+
+/* ---------------- account creation via invite code ---------------- */
+function showSignup(){
+  $('#login').innerHTML = `<div class="loginCard">
+    <div class="logo">A</div>
+    <h1>Create your account</h1>
+    <p class="sub">Enter the invite code your manager sent you, then choose a password.</p>
+    <div id="suMsg"></div>
+    <div class="field"><label for="su_code">Invite code</label>
+      <input id="su_code" type="text" placeholder="ABCD-1234" autocapitalize="characters" spellcheck="false"></div>
+    <div class="field"><label for="su_email">Email</label>
+      <input id="su_email" type="email" autocomplete="username" placeholder="you@example.com"></div>
+    <div class="field"><label for="su_pw">Choose a password</label>
+      <input id="su_pw" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
+    <button class="btn pri full" id="su_go">Create account</button>
+    <p class="sub" style="margin:16px 0 0;text-align:center;font-size:12.5px">
+      Already have an account? <button class="linkbtn" id="toSignin">Sign in</button></p>
+  </div>`;
+  $('#toSignin').onclick = () => location.reload();
+  $('#su_go').onclick = doSignup;
+  $('#su_pw').onkeydown = e => { if(e.key==='Enter') doSignup(); };
+}
+
+async function doSignup(){
+  const box=$('#suMsg'), btn=$('#su_go');
+  const code=$('#su_code').value.trim(), email=$('#su_email').value.trim(), pw=$('#su_pw').value;
+  const err = m => { box.innerHTML = `<div class="msg err">${esc(m)}</div>`; };
+  box.innerHTML='';
+  if(!code){ err('Enter your invite code.'); return; }
+  if(!email){ err('Enter your email.'); return; }
+  if(pw.length < 8){ err('Password must be at least 8 characters.'); return; }
+
+  btn.disabled=true; btn.textContent='Creating account…';
+  // 1. create the auth user
+  const { error: suErr } = await db.auth.signUp({ email, password: pw });
+  if(suErr){
+    // an existing account is fine — sign in and redeem against it
+    const { error: siErr } = await db.auth.signInWithPassword({ email, password: pw });
+    if(siErr){ btn.disabled=false; btn.textContent='Create account'; err(suErr.message); return; }
+  }
+  // 2. make sure we have a session (email confirmation may be on)
+  const { data:{ session } } = await db.auth.getSession();
+  if(!session){
+    btn.disabled=false; btn.textContent='Create account';
+    err('Account created. Please confirm your email, then sign in and enter your code.');
+    return;
+  }
+  // 3. redeem the invite
+  const { data, error } = await db.rpc('dh_redeem_invite', { p_code: code });
+  if(error){
+    btn.disabled=false; btn.textContent='Create account';
+    err(error.message); return;
+  }
+  const info = Array.isArray(data) ? data[0] : data;
+  toast(`Welcome${info?.member_name ? ', '+info.member_name.split(' ')[0] : ''}`);
+  boot();
+}
+
 /* ---------------- boot ---------------- */
 async function boot(){
   const { data:{ user } } = await db.auth.getUser();
@@ -253,10 +336,26 @@ async function boot(){
 
   if(ouErr){ $('#view').innerHTML = errBox(ouErr.message); return; }
   if(!ou){
-    $('#view').innerHTML = `<div class="panel"><div class="empty">
-      <b>No organisation yet</b>This account isn't linked to an organisation.
-      Ask an admin to add you, or create one in the dashboard.</div></div>`;
     $('#tabs').innerHTML = '';
+    $('#view').innerHTML = `<div class="panel" style="max-width:440px;margin:0 auto">
+      <div class="phead"><h2>Enter your invite code</h2>
+      <p>This account isn't linked to an organisation yet. If your manager sent you a
+      code, enter it here.</p></div>
+      <div class="pbody">
+        <div id="rdMsg"></div>
+        <div class="field"><label for="rd_code">Invite code</label>
+          <input id="rd_code" type="text" placeholder="ABCD-1234" autocapitalize="characters"></div>
+        <button class="btn pri full" id="rd_go" style="margin-top:10px">Join</button>
+      </div></div>`;
+    const go = async () => {
+      const c = $('#rd_code').value.trim();
+      if(!c){ $('#rdMsg').innerHTML='<div class="msg err">Enter your code.</div>'; return; }
+      const { error } = await db.rpc('dh_redeem_invite', { p_code: c });
+      if(error){ $('#rdMsg').innerHTML=`<div class="msg err">${esc(error.message)}</div>`; return; }
+      toast('You\'re in'); boot();
+    };
+    $('#rd_go').onclick = go;
+    $('#rd_code').onkeydown = e => { if(e.key==='Enter') go(); };
     return;
   }
 
@@ -282,7 +381,7 @@ const isMgr = () => ['owner','admin','manager'].includes(S.role);
 
 function buildTabs(){
   const tabs = isMgr()
-    ? [['today','Today'],['team','Team'],['shifts','Shifts'],['timesheets','Timesheets'],['leave','Leave'],['costs','Costs']]
+    ? [['today','Today'],['team','Team'],['shifts','Shifts'],['timesheets','Timesheets'],['leave','Leave'],['costs','Costs'],['setup','Setup']]
     : [['today','Today'],['shifts','My shifts'],['leave','My leave']];
   $('#tabs').innerHTML = tabs.map(([k,l])=>`<button data-t="${k}">${l}</button>`).join('');
   $('#tabs').onclick = e => {
@@ -312,6 +411,8 @@ async function refresh(){
   if(isMgr()){
     q.push(db.from('dh_members').select('*, dh_locations(name)').eq('org_id',org).order('full_name'));
     q.push(db.from('dh_contributions').select('*').eq('org_id',org).order('sort_order'));
+    q.push(db.from('dh_locations').select('*').eq('org_id',org).order('name'));
+    q.push(db.from('dh_leave_types').select('*').eq('org_id',org).order('name'));
   }
 
   const res = await Promise.all(q);
@@ -324,6 +425,8 @@ async function refresh(){
   S.openEntry = S.me ? open.find(e=>e.member_id===S.me.id) || null : null;
   S.members  = isMgr() ? (res[3].data || []) : [];
   S.contributions = isMgr() ? (res[4].data || []) : [];
+  S.locations = isMgr() ? (res[5].data || []) : [];
+  S.leaveTypes = isMgr() ? (res[6].data || []) : [];
 
   if(S.me){
     const { data:bal } = await db.from('dh_leave_balances')
@@ -377,6 +480,306 @@ async function decideLeave(id, approve){
   if(error){ toast(error.message, true); return; }
   toast(approve ? 'Leave approved' : 'Leave declined');
   refresh();
+}
+
+
+/* ---------------- modal helper ---------------- */
+function modal(title, bodyHTML, footHTML){
+  $('#modal').innerHTML = `<h3>${esc(title)}</h3><div class="mbody">${bodyHTML}</div>
+    <div class="mfoot">${footHTML}</div>`;
+  $('#modalbg').classList.add('on');
+}
+function closeModal(){ $('#modalbg').classList.remove('on'); $('#modal').innerHTML=''; }
+$('#modalbg').addEventListener('click', e => { if(e.target.id==='modalbg') closeModal(); });
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+
+const fld = (id,label,val,type,extra) =>
+  `<div class="field"><label for="${id}">${esc(label)}</label>
+   <input id="${id}" type="${type||'text'}" value="${esc(val??'')}" ${extra||''}></div>`;
+const sel = (id,label,val,opts) =>
+  `<div class="field"><label for="${id}">${esc(label)}</label><select id="${id}">
+   ${opts.map(([v,l])=>`<option value="${esc(v)}"${String(v)===String(val)?' selected':''}>${esc(l)}</option>`).join('')}
+   </select></div>`;
+const V = id => { const el=$('#'+id); return el ? el.value.trim() : ''; };
+
+async function run(promise, okMsg){
+  const { error } = await promise;
+  if(error){ toast(error.message, true); return false; }
+  if(okMsg) toast(okMsg);
+  closeModal(); await refresh(); return true;
+}
+
+/* ---------------- people ---------------- */
+function memberForm(m){
+  const locs = [['','— none —'], ...S.locations.map(l=>[l.id,l.name])];
+  modal(m ? 'Edit member' : 'Add member', `
+    ${fld('f_name','Full name', m?.full_name, 'text', 'placeholder="Jane Doe"')}
+    <div class="grid2">
+      ${fld('f_email','Email', m?.email, 'email', 'placeholder="jane@example.com"')}
+      ${fld('f_title','Job title', m?.job_title, 'text', 'placeholder="Barista"')}
+    </div>
+    <div class="grid2">
+      ${sel('f_type','Employment', m?.employment_type||'full_time',
+        [['full_time','Full time'],['part_time','Part time'],['casual','Casual'],['contract','Contract']])}
+      ${sel('f_basis','Pay basis', m?.pay_basis||'monthly',
+        [['monthly','Per month'],['hourly','Per hour'],['annual','Per year']])}
+    </div>
+    <div class="grid2">
+      ${fld('f_rate','Pay rate ('+sym().trim()+')', m?.pay_rate ?? 0, 'number', 'min="0" step="0.01"')}
+      ${sel('f_loc','Location', m?.primary_location_id||'', locs)}
+    </div>
+    ${m ? sel('f_status','Status', m.status,
+        [['active','Active'],['invited','Invited'],['suspended','Suspended'],['offboarded','Offboarded']]) : ''}
+    <p class="hint" style="margin-top:6px">
+      ${m ? 'Changes apply immediately.' : 'After saving you can issue an invite code so they can set up their own login.'}</p>`,
+    `${m ? `<button class="btn bad" id="m_del">Remove</button>` : ''}
+     <div class="spacer"></div>
+     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn pri" id="m_save">${m?'Save':'Add member'}</button>`);
+
+  $('#m_save').onclick = async () => {
+    if(!V('f_name')){ toast('Name is required', true); return; }
+    const row = {
+      full_name: V('f_name'), email: V('f_email')||null, job_title: V('f_title')||null,
+      employment_type: V('f_type'), pay_basis: V('f_basis'),
+      pay_rate: parseFloat(V('f_rate'))||0,
+      primary_location_id: V('f_loc')||null
+    };
+    if(m){
+      row.status = V('f_status');
+      await run(db.from('dh_members').update(row).eq('id',m.id), 'Member updated');
+    } else {
+      row.org_id = S.org.id; row.status = 'invited'; row.started_on = new Date().toISOString().slice(0,10);
+      const { data, error } = await db.from('dh_members').insert(row).select().single();
+      if(error){ toast(error.message, true); return; }
+      closeModal(); await refresh();
+      inviteFor(data.id, data.full_name);
+    }
+  };
+  if(m) $('#m_del').onclick = () => confirmRemove(m);
+}
+
+function confirmRemove(m){
+  modal('Remove '+m.full_name+'?', `
+    <p style="font-size:13.5px;line-height:1.6;color:var(--muted)">
+      If they have timesheets or approved leave, the record is kept and marked
+      <b>offboarded</b> so payroll history stays intact. They'll stop appearing on
+      rosters and in cost totals.</p>
+    <p style="font-size:13.5px;line-height:1.6;color:var(--muted);margin-top:8px">
+      If they have no history at all, the record is deleted outright.</p>`,
+    `<div class="spacer"></div>
+     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn bad" id="r_go">Remove</button>`);
+  $('#r_go').onclick = async () => {
+    const { data, error } = await db.rpc('dh_remove_member', { p_member: m.id });
+    if(error){ toast(error.message, true); return; }
+    toast(data === 'deleted' ? 'Member deleted' : 'Member offboarded, history kept');
+    closeModal(); refresh();
+  };
+}
+
+async function inviteFor(memberId, name){
+  const { data, error } = await db.rpc('dh_create_invite', { p_member: memberId });
+  if(error){ toast(error.message, true); return; }
+  const url = location.origin + location.pathname;
+  modal('Invite code for '+name, `
+    <p style="font-size:13.5px;color:var(--muted);line-height:1.6">
+      Send this to ${esc(name)}. They open the link, choose <b>Create account</b>,
+      set their own password, and enter this code.</p>
+    <div class="codebox"><div class="c">${esc(data)}</div></div>
+    <p class="hint">Valid for 30 days, single use. Issuing a new code replaces this one.</p>
+    <div class="field" style="margin-top:10px"><label>Link</label>
+      <input value="${esc(url)}" readonly onclick="this.select()"></div>`,
+    `<div class="spacer"></div>
+     <button class="btn" id="i_copy">Copy message</button>
+     <button class="btn pri" onclick="closeModal()">Done</button>`);
+  $('#i_copy').onclick = () => {
+    const msg = `Hi ${name}, here's your Attenda login.\n\n${url}\n\nChoose "Create account", set a password, then enter this code:\n${data}`;
+    navigator.clipboard.writeText(msg).then(
+      ()=>toast('Message copied'), ()=>toast('Copy failed — select the code manually', true));
+  };
+}
+
+/* ---------------- contributions ---------------- */
+function contribForm(c){
+  modal(c ? 'Edit contribution' : 'Add contribution', `
+    ${fld('c_name','Name', c?.name, 'text', 'placeholder="Social security"')}
+    ${sel('c_basis','Basis', c?.basis||'percent', [['percent','% of salary'],['fixed','Fixed amount']])}
+    <div class="grid2">
+      ${fld('c_er','Employer share', c?.employer_value ?? 0, 'number', 'min="0" step="0.0001"')}
+      ${fld('c_ee','Employee share', c?.employee_value ?? 0, 'number', 'min="0" step="0.0001"')}
+    </div>
+    <p class="hint">Percentages are of the monthly base. Fixed amounts are in ${esc(S.org.currency_code)}.
+    These are your own figures — confirm them with your local authority.</p>`,
+    `${c ? `<button class="btn bad" id="c_del">Delete</button>` : ''}
+     <div class="spacer"></div>
+     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn pri" id="c_save">${c?'Save':'Add'}</button>`);
+
+  $('#c_save').onclick = async () => {
+    if(!V('c_name')){ toast('Name is required', true); return; }
+    const row = { name:V('c_name'), basis:V('c_basis'),
+      employer_value: parseFloat(V('c_er'))||0, employee_value: parseFloat(V('c_ee'))||0 };
+    if(c) await run(db.from('dh_contributions').update(row).eq('id',c.id), 'Contribution updated');
+    else { row.org_id=S.org.id; row.sort_order=S.contributions.length+1;
+      await run(db.from('dh_contributions').insert(row), 'Contribution added'); }
+  };
+  if(c) $('#c_del').onclick = async () =>
+    run(db.from('dh_contributions').delete().eq('id',c.id), 'Contribution deleted');
+}
+
+/* ---------------- locations ---------------- */
+function locForm(l){
+  modal(l ? 'Edit location' : 'Add location', `
+    ${fld('l_name','Name', l?.name, 'text', 'placeholder="Main branch"')}
+    ${fld('l_addr','Address', l?.address, 'text')}
+    <div class="grid2">
+      ${fld('l_lat','Latitude', l?.latitude ?? '', 'number', 'step="0.000001" placeholder="1.283000"')}
+      ${fld('l_lng','Longitude', l?.longitude ?? '', 'number', 'step="0.000001" placeholder="103.860000"')}
+    </div>
+    ${fld('l_rad','Clock-in radius (metres)', l?.radius_metres ?? 50, 'number', 'min="10" max="5000"')}
+    <p class="hint">Staff can only clock in within this radius. Leave latitude and
+    longitude blank to skip the location check entirely.
+    <button class="linkbtn" id="l_here">Use my current location</button></p>`,
+    `${l ? `<button class="btn bad" id="l_del">Delete</button>` : ''}
+     <div class="spacer"></div>
+     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn pri" id="l_save">${l?'Save':'Add'}</button>`);
+
+  $('#l_here').onclick = async () => {
+    const p = await position();
+    if(!p){ toast('Could not read your location', true); return; }
+    $('#l_lat').value = p.lat.toFixed(6); $('#l_lng').value = p.lng.toFixed(6);
+    toast('Filled in from your device');
+  };
+  $('#l_save').onclick = async () => {
+    if(!V('l_name')){ toast('Name is required', true); return; }
+    const row = { name:V('l_name'), address:V('l_addr')||null,
+      latitude: V('l_lat')?parseFloat(V('l_lat')):null,
+      longitude: V('l_lng')?parseFloat(V('l_lng')):null,
+      radius_metres: parseInt(V('l_rad'))||50 };
+    if(l) await run(db.from('dh_locations').update(row).eq('id',l.id), 'Location updated');
+    else { row.org_id=S.org.id; await run(db.from('dh_locations').insert(row), 'Location added'); }
+  };
+  if(l) $('#l_del').onclick = async () =>
+    run(db.from('dh_locations').delete().eq('id',l.id), 'Location deleted');
+}
+
+/* ---------------- leave types ---------------- */
+function leaveTypeForm(t){
+  modal(t ? 'Edit leave type' : 'Add leave type', `
+    ${fld('t_name','Name', t?.name, 'text', 'placeholder="Annual leave"')}
+    <div class="grid2">
+      ${fld('t_days','Days per year', t?.days_per_year ?? 0, 'number', 'min="0" step="0.5"')}
+      ${sel('t_paid','Paid', t? (t.is_paid?'1':'0') : '1', [['1','Paid'],['0','Unpaid']])}
+    </div>`,
+    `${t ? `<button class="btn bad" id="t_del">Delete</button>` : ''}
+     <div class="spacer"></div>
+     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn pri" id="t_save">${t?'Save':'Add'}</button>`);
+
+  $('#t_save').onclick = async () => {
+    if(!V('t_name')){ toast('Name is required', true); return; }
+    const row = { name:V('t_name'), days_per_year: parseFloat(V('t_days'))||0,
+                  is_paid: V('t_paid')==='1' };
+    if(t) await run(db.from('dh_leave_types').update(row).eq('id',t.id), 'Leave type updated');
+    else { row.org_id=S.org.id; await run(db.from('dh_leave_types').insert(row), 'Leave type added'); }
+  };
+  if(t) $('#t_del').onclick = async () =>
+    run(db.from('dh_leave_types').delete().eq('id',t.id), 'Leave type deleted');
+}
+
+/* ---------------- shifts ---------------- */
+function shiftForm(){
+  const mem = S.members.filter(m=>m.status!=='offboarded');
+  if(!mem.length){ toast('Add a member first', true); return; }
+  const today = new Date().toISOString().slice(0,10);
+  modal('Schedule shift', `
+    ${sel('s_mem','Member','',mem.map(m=>[m.id,m.full_name]))}
+    ${sel('s_loc','Location','',[['','— none —'],...S.locations.map(l=>[l.id,l.name])])}
+    ${fld('s_date','Date', today, 'date')}
+    <div class="grid2">
+      ${fld('s_start','Starts', '09:00', 'time')}
+      ${fld('s_end','Ends', '17:00', 'time')}
+    </div>
+    ${fld('s_break','Unpaid break (minutes)', 0, 'number', 'min="0"')}
+    <p class="hint">Times are in ${esc(S.org.timezone||'your local timezone')}.</p>`,
+    `<div class="spacer"></div>
+     <button class="btn" onclick="closeModal()">Cancel</button>
+     <button class="btn pri" id="s_save">Schedule</button>`);
+
+  $('#s_save').onclick = async () => {
+    const d=V('s_date'), st=V('s_start'), en=V('s_end');
+    if(!d||!st||!en){ toast('Date and times are required', true); return; }
+    const starts = new Date(`${d}T${st}`);
+    let ends = new Date(`${d}T${en}`);
+    if(ends <= starts) ends = new Date(ends.getTime()+864e5); // overnight shift
+    await run(db.from('dh_shifts').insert({
+      org_id:S.org.id, member_id:V('s_mem'), location_id:V('s_loc')||null,
+      shift_date:d, starts_at:starts.toISOString(), ends_at:ends.toISOString(),
+      break_minutes: parseInt(V('s_break'))||0, status:'scheduled'
+    }), 'Shift scheduled');
+  };
+}
+
+async function deleteShift(id){
+  if(!confirm('Delete this shift?')) return;
+  const { error } = await db.from('dh_shifts').delete().eq('id',id);
+  if(error){ toast(error.message, true); return; }
+  toast('Shift deleted'); refresh();
+}
+
+/* ---------------- setup view ---------------- */
+function vSetup(){
+  const row = (label, val, onEdit) => '';
+  return `
+  <div class="panel"><div class="phead"><h2>Locations</h2>
+    <div class="spacer"></div><button class="btn pri" data-add="loc">Add location</button>
+    <p>Sites where staff clock in. The radius controls how close they must be.</p></div>
+  ${S.locations.length ? `<div class="tscroll"><table><thead><tr><th>Name</th><th>Address</th><th>Radius</th><th>Geofence</th><th></th></tr></thead><tbody>
+  ${S.locations.map(l=>`<tr><td class="name">${esc(l.name)}</td>
+    <td class="meta">${esc(l.address||'—')}</td>
+    <td class="mono">${l.radius_metres} m</td>
+    <td>${l.latitude!=null?'<span class="pill good">On</span>':'<span class="pill grey">Off</span>'}</td>
+    <td><button class="linkbtn" data-editloc="${l.id}">Edit</button></td></tr>`).join('')}
+  </tbody></table></div>` : '<div class="empty"><b>No locations</b>Add one so staff can clock in.</div>'}
+  </div>
+
+  <div class="panel"><div class="phead"><h2>Contributions</h2>
+    <div class="spacer"></div><button class="btn pri" data-add="contrib">Add contribution</button>
+    <p>Statutory and voluntary contributions. Seeded from ${esc(S.org.country_code)} when the
+    organisation was created — rename, adjust or delete them to match your obligations.</p></div>
+  ${S.contributions.length ? `<div class="tscroll"><table><thead><tr><th>Name</th><th>Basis</th><th>Employer</th><th>Employee</th><th></th></tr></thead><tbody>
+  ${S.contributions.map(c=>`<tr><td class="name">${esc(c.name)}</td>
+    <td>${c.basis==='percent'?'% of salary':'Fixed'}</td>
+    <td class="mono">${c.basis==='percent'?Number(c.employer_value)+'%':money(c.employer_value)}</td>
+    <td class="mono">${c.basis==='percent'?Number(c.employee_value)+'%':money(c.employee_value)}</td>
+    <td><button class="linkbtn" data-editcon="${c.id}">Edit</button></td></tr>`).join('')}
+  </tbody></table></div>` : '<div class="empty"><b>No contributions</b>Costs will show salary only.</div>'}
+  </div>
+
+  <div class="panel"><div class="phead"><h2>Leave types</h2>
+    <div class="spacer"></div><button class="btn pri" data-add="ltype">Add leave type</button>
+    <p>Yearly allowance for each kind of leave.</p></div>
+  ${S.leaveTypes.length ? `<div class="tscroll"><table><thead><tr><th>Name</th><th>Days / year</th><th>Paid</th><th></th></tr></thead><tbody>
+  ${S.leaveTypes.map(t=>`<tr><td class="name">${esc(t.name)}</td>
+    <td class="mono">${t.days_per_year}</td>
+    <td>${t.is_paid?'<span class="pill good">Paid</span>':'<span class="pill grey">Unpaid</span>'}</td>
+    <td><button class="linkbtn" data-editlt="${t.id}">Edit</button></td></tr>`).join('')}
+  </tbody></table></div>` : '<div class="empty"><b>No leave types</b>Add at least one.</div>'}
+  </div>
+
+  <div class="panel"><div class="phead"><h2>Organisation</h2>
+    <p>Country and currency drive the contribution template and money formatting.
+    Standard hours convert hourly pay into a monthly figure on the Costs tab.</p></div>
+  <div class="pbody"><div class="grid2">
+    <div><div class="k">Name</div><div style="font-weight:600;margin-top:4px">${esc(S.org.name)}</div></div>
+    <div><div class="k">Country / currency</div><div style="font-weight:600;margin-top:4px">${esc(S.org.country_code)} · ${esc(S.org.currency_code)}</div></div>
+    <div><div class="k">Timezone</div><div style="font-weight:600;margin-top:4px">${esc(S.org.timezone)}</div></div>
+    <div><div class="k">Standard week</div><div style="font-weight:600;margin-top:4px">${S.org.hours_per_week} hours</div></div>
+  </div>
+  <p class="hint" style="margin-top:12px">Organisation settings are changed in the Supabase dashboard for now.</p>
+  </div></div>`;
 }
 
 /* ---------------- views ---------------- */
@@ -445,10 +848,12 @@ function vToday(){
 
 function vShifts(){
   const rows = isMgr() ? S.shifts : S.shifts.filter(s=>S.me && s.member_id===S.me.id);
-  if(!rows.length) return `<div class="panel"><div class="empty">
-    <b>No shifts in this period</b>Showing two weeks either side of today.</div></div>`;
-  return `<div class="panel"><div class="phead"><h2>${isMgr()?'Shifts':'My shifts'}</h2>
-    <p>Two weeks either side of today.</p></div>
+  const head = `<div class="phead"><h2>${isMgr()?'Shifts':'My shifts'}</h2>
+    ${isMgr()?'<div class="spacer"></div><button class="btn pri" data-add="shift">Schedule shift</button>':''}
+    <p>Two weeks either side of today.</p></div>`;
+  if(!rows.length) return `<div class="panel">${head}<div class="empty">
+    <b>No shifts in this period</b>${isMgr()?'Schedule one to get started.':'Nothing rostered for you yet.'}</div></div>`;
+  return `<div class="panel">${head}
   <div class="tscroll"><table><thead><tr><th>Date</th>${isMgr()?'<th>Member</th>':''}<th>Time</th><th>Location</th><th>Status</th><th></th></tr></thead><tbody>
   ${rows.map(s=>{
     const canClock = S.me && s.member_id===S.me.id && !S.openEntry
@@ -458,17 +863,21 @@ function vShifts(){
       <div class="name">${esc(s.dh_members?.full_name)}</div></div></td>`:''}
     <td class="mono">${hhmm(s.starts_at)}–${hhmm(s.ends_at)}</td>
     <td>${esc(s.dh_locations?.name||'—')}</td><td>${shiftPill(s)}</td>
-    <td>${canClock?`<button class="btn sm pri" data-ci="${s.id}">Clock in</button>`:''}</td></tr>`;
+    <td style="white-space:nowrap">${canClock?`<button class="btn sm pri" data-ci="${s.id}">Clock in</button>`:''}
+      ${isMgr()&&s.status==='scheduled'?`<button class="linkbtn danger" data-delshift="${s.id}">Delete</button>`:''}</td></tr>`;
   }).join('')}
   </tbody></table></div></div>`;
 }
 
 function vTeam(){
-  if(!S.members.length) return `<div class="panel"><div class="empty">
-    <b>No members yet</b>Add your staff in the Supabase dashboard for now.</div></div>`;
-  return `<div class="panel"><div class="phead"><h2>Team</h2>
-    <p>Everyone directly employed by ${esc(S.org.name)}.</p></div>
-  <div class="tscroll"><table><thead><tr><th>Member</th><th>Type</th><th>Pay</th><th>Location</th><th>Status</th></tr></thead><tbody>
+  const head = `<div class="phead"><h2>Team</h2>
+    <div class="spacer"></div><button class="btn pri" data-add="member">Add member</button>
+    <p>Everyone directly employed by ${esc(S.org.name)}. Offboarded people stay listed
+    so their payroll history is preserved.</p></div>`;
+  if(!S.members.length) return `<div class="panel">${head}<div class="empty">
+    <b>No members yet</b>Add your first employee to get started.</div></div>`;
+  return `<div class="panel">${head}
+  <div class="tscroll"><table><thead><tr><th>Member</th><th>Type</th><th>Pay</th><th>Location</th><th>Status</th><th></th></tr></thead><tbody>
   ${S.members.map(m=>`<tr>
     <td><div class="rowflex"><div class="av">${initials(m.full_name)}</div>
       <div><div class="name">${esc(m.full_name)}</div><div class="meta">${esc(m.job_title||'')}</div></div></div></td>
@@ -477,7 +886,11 @@ function vTeam(){
     <td>${esc(m.dh_locations?.name||'—')}</td>
     <td>${m.status==='active'?'<span class="pill good">Active</span>'
       :m.status==='invited'?'<span class="pill warn">Invited</span>'
-      :`<span class="pill grey">${esc(m.status)}</span>`}</td></tr>`).join('')}
+      :`<span class="pill grey">${esc(m.status)}</span>`}</td>
+    <td style="white-space:nowrap">
+      <button class="linkbtn" data-editmem="${m.id}">Edit</button>
+      ${!m.user_id && m.status!=='offboarded' ? `<button class="linkbtn" data-invite="${m.id}">Invite</button>` : ''}
+    </td></tr>`).join('')}
   </tbody></table></div></div>`;
 }
 
@@ -558,7 +971,7 @@ function vCosts(){
   <div class="tscroll"><table><thead><tr><th>Member</th><th>Base</th><th>Employer</th><th>Total</th><th>Deduction</th><th>Net</th></tr></thead>
   <tbody>${rows}</tbody></table></div></div>
   <div class="panel"><div class="phead"><h2>Contributions</h2>
-    <p>Seeded from ${esc(S.org.country_code)}. Edit these in the dashboard.</p></div>
+    <p>Seeded from ${esc(S.org.country_code)}. Edit them under Setup.</p></div>
   <div class="tscroll"><table><thead><tr><th>Name</th><th>Basis</th><th>Employer</th><th>Employee</th></tr></thead><tbody>
   ${S.contributions.map(c=>`<tr><td class="name">${esc(c.name)}</td>
     <td>${c.basis==='percent'?'% of salary':'Fixed'}</td>
@@ -567,7 +980,7 @@ function vCosts(){
   </tbody></table></div></div>`;
 }
 
-const VIEWS = { today:vToday, shifts:vShifts, team:vTeam, timesheets:vTimesheets, leave:vLeave, costs:vCosts };
+const VIEWS = { today:vToday, shifts:vShifts, team:vTeam, timesheets:vTimesheets, leave:vLeave, costs:vCosts, setup:vSetup };
 
 function render(){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===S.tab));
@@ -577,6 +990,29 @@ function render(){
 
 /* ---------------- delegated clicks ---------------- */
 $('#view').addEventListener('click', e => {
+  const add = e.target.closest('[data-add]');
+  if(add){
+    const k = add.dataset.add;
+    if(k==='member')  memberForm(null);
+    if(k==='contrib') contribForm(null);
+    if(k==='loc')     locForm(null);
+    if(k==='ltype')   leaveTypeForm(null);
+    if(k==='shift')   shiftForm();
+    return;
+  }
+  const em = e.target.closest('[data-editmem]');
+  if(em){ memberForm(S.members.find(m=>m.id===em.dataset.editmem)); return; }
+  const iv = e.target.closest('[data-invite]');
+  if(iv){ const m=S.members.find(x=>x.id===iv.dataset.invite); inviteFor(m.id,m.full_name); return; }
+  const ec = e.target.closest('[data-editcon]');
+  if(ec){ contribForm(S.contributions.find(c=>c.id===ec.dataset.editcon)); return; }
+  const el = e.target.closest('[data-editloc]');
+  if(el){ locForm(S.locations.find(l=>l.id===el.dataset.editloc)); return; }
+  const et = e.target.closest('[data-editlt]');
+  if(et){ leaveTypeForm(S.leaveTypes.find(t=>t.id===et.dataset.editlt)); return; }
+  const ds = e.target.closest('[data-delshift]');
+  if(ds){ deleteShift(ds.dataset.delshift); return; }
+
   const ci = e.target.closest('[data-ci]');
   if(ci){ clockIn(ci.dataset.ci); return; }
   if(e.target.closest('#coBtn')){ clockOut(); return; }

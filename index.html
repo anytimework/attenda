@@ -130,6 +130,13 @@ tbody tr:hover{background:#fafcfd}
 .modal .mfoot .spacer{flex:1}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 @media(max-width:520px){.grid2{grid-template-columns:1fr}}
+.badge{display:inline-flex;align-items:center;justify-content:center;
+  min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:var(--bad);
+  color:#fff;font-size:11px;font-weight:700;margin-left:6px;vertical-align:middle}
+nav.tabs button.on .badge{background:var(--brand)}
+.appcard{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:15px 16px;margin-bottom:11px;box-shadow:var(--sh)}
+.approw{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .wdate{font-size:14px;font-weight:600;color:var(--muted);margin:2px 0 12px}
 .wcard{background:var(--card);border:1px solid var(--line);border-radius:14px;
   padding:17px;box-shadow:var(--sh);margin-bottom:12px}
@@ -285,7 +292,7 @@ function toast(msg, isErr){
 const S = { user:null, org:null, role:null, me:null, tab:'today',
             shifts:[], members:[], leave:[], contributions:[], locations:[],
             leaveTypes:[], overrides:[], openEntry:null, balances:[],
-            timesheets:[], stats:null, breakChoice:null };
+            timesheets:[], stats:null, breakChoice:null, pending:null };
 
 /* ---------------- auth ---------------- */
 $('#signInBtn').onclick = signIn;
@@ -540,10 +547,14 @@ const isMgr = () => ['owner','admin','manager'].includes(S.role);
 
 function buildTabs(){
   const tabs = isMgr()
-    ? [['today','Today'],['team','Team'],['shifts','Shifts'],['timesheets','Timesheets'],['leave','Leave'],['costs','Costs'],['setup','Setup']]
+    ? [['today','Today'],['approvals','Approvals'],['team','Team'],['shifts','Shifts'],
+       ['timesheets','Timesheets'],['leave','Leave'],['costs','Costs'],['setup','Setup']]
     : wTabs();
   if(!isMgr() && !WVIEWS[S.tab]) S.tab = 'clock';
-  $('#tabs').innerHTML = tabs.map(([k,l])=>`<button data-t="${k}">${l}</button>`).join('');
+  $('#tabs').innerHTML = tabs.map(([k,l])=>{
+    const n = k==='approvals' ? (S.pending?.leave_pending || 0) : 0;
+    return `<button data-t="${k}">${l}${n?`<span class="badge">${n}</span>`:''}</button>`;
+  }).join('');
   $('#tabs').onclick = e => {
     const b = e.target.closest('button[data-t]'); if(!b) return;
     S.tab = b.dataset.t; render();
@@ -592,6 +603,11 @@ async function refresh(){
   S.leaveTypes = isMgr() ? (res[6].data || []) : [];
   S.overrides  = isMgr() ? (res[7].data || []) : [];
 
+  if(isMgr()){
+    const { data:pc } = await db.rpc('dh_pending_counts');
+    S.pending = Array.isArray(pc) ? pc[0] : pc;
+    buildTabs();
+  }
   if(S.me){
     const { data:bal } = await db.from('dh_leave_balances')
       .select('*').eq('member_id', S.me.id);
@@ -653,11 +669,7 @@ async function cancelLeave(id){
 }
 
 async function decideLeave(id, approve){
-  const { error } = await db.from('dh_leave_requests').update({
-    status: approve ? 'approved' : 'declined',
-    decided_by: S.user.id,
-    decided_at: new Date().toISOString()
-  }).eq('id', id);
+  const { error } = await db.rpc('dh_decide_leave', { p_request:id, p_approve:approve });
   if(error){ toast(error.message, true); return; }
   toast(approve ? 'Leave approved' : 'Leave declined');
   refresh();
@@ -1515,7 +1527,70 @@ function leaveRequestForm(){
 
 const WVIEWS = { clock:vClock, history:vHistory, wleave:vWLeave, payslip:vPayslip };
 
-const VIEWS = { today:vToday, shifts:vShifts, team:vTeam, timesheets:vTimesheets, leave:vLeave, costs:vCosts, setup:vSetup };
+
+function vApprovals(){
+  const pending = S.leave.filter(l=>l.status==='pending');
+  const recent  = S.leave.filter(l=>l.status!=='pending').slice(0,8);
+  const stale   = S.shifts.filter(s=>s.status==='scheduled'
+    && s.shift_date < new Date().toISOString().slice(0,10));
+
+  return `
+  <div class="grid cards" style="margin-bottom:14px">
+    <div class="card"><div class="k">Leave to approve</div>
+      <div class="v" style="color:${pending.length?'var(--warn)':'inherit'}">${pending.length}</div>
+      <div class="vsub">${pending.length?'waiting on you':'all caught up'}</div></div>
+    <div class="card"><div class="k">Unworked shifts</div>
+      <div class="v" style="color:${stale.length?'var(--bad)':'inherit'}">${stale.length}</div>
+      <div class="vsub">past date, never clocked in</div></div>
+    <div class="card"><div class="k">Invites outstanding</div>
+      <div class="v">${S.pending?.invites_pending ?? 0}</div>
+      <div class="vsub">codes not yet used</div></div>
+  </div>
+
+  <div class="panel"><div class="phead"><h2>Leave requests</h2>
+    <p>Approving checks the balance first, so you cannot overdraw someone's allowance by mistake.</p></div>
+    <div class="pbody" style="padding-top:14px">
+    ${pending.length ? pending.map(l=>`
+      <div class="appcard"><div class="approw">
+        <div style="flex:1;min-width:180px">
+          <div class="rowflex"><div class="av">${initials(l.dh_members?.full_name)}</div>
+            <div><div class="name">${esc(l.dh_members?.full_name)}</div>
+              <div class="meta">${esc(l.dh_leave_types?.name||'Leave')}${
+                l.dh_leave_types && !l.dh_leave_types.is_paid?' · unpaid':''}</div></div></div>
+          <div class="meta" style="margin-top:8px">
+            ${dmy(l.starts_on)}${l.days_count>1?' → '+dmy(l.ends_on):''} · ${l.days_count} day${l.days_count==1?'':'s'}
+            ${l.reason?` · "${esc(l.reason)}"`:''}</div>
+        </div>
+        <div class="rowflex">
+          <button class="btn sm good" data-ap="${l.id}">Approve</button>
+          <button class="btn sm bad" data-dc="${l.id}">Decline</button>
+        </div>
+      </div></div>`).join('')
+      : `<div class="empty"><b>Nothing waiting</b>New leave requests appear here.</div>`}
+    </div>
+  </div>
+
+  ${stale.length ? `<div class="panel"><div class="phead"><h2>Shifts never worked</h2>
+    <p>Scheduled for a past date with no clock-in. Mark them or delete them.</p></div>
+    <div class="tscroll"><table><thead><tr><th>Date</th><th>Member</th><th>Time</th><th></th></tr></thead><tbody>
+    ${stale.map(s=>`<tr><td class="mono">${dmy(s.shift_date)}</td>
+      <td>${esc(s.dh_members?.full_name||'—')}</td>
+      <td class="mono">${hhmm(s.starts_at)}–${hhmm(s.ends_at)}</td>
+      <td><button class="linkbtn danger" data-delshift="${s.id}">Delete</button></td></tr>`).join('')}
+    </tbody></table></div></div>` : ''}
+
+  ${recent.length ? `<div class="panel"><div class="phead"><h2>Recently decided</h2></div>
+    <div class="tscroll"><table><thead><tr><th>Member</th><th>Type</th><th>Dates</th><th>Status</th></tr></thead><tbody>
+    ${recent.map(l=>`<tr><td>${esc(l.dh_members?.full_name)}</td>
+      <td>${esc(l.dh_leave_types?.name||'')}</td>
+      <td class="mono">${dmy(l.starts_on)}${l.days_count>1?' → '+dmy(l.ends_on):''}</td>
+      <td>${l.status==='approved'?'<span class="pill good">Approved</span>'
+        :l.status==='declined'?'<span class="pill bad">Declined</span>'
+        :`<span class="pill grey">${esc(l.status)}</span>`}</td></tr>`).join('')}
+    </tbody></table></div></div>` : ''}`;
+}
+
+const VIEWS = { approvals:vApprovals, today:vToday, shifts:vShifts, team:vTeam, timesheets:vTimesheets, leave:vLeave, costs:vCosts, setup:vSetup };
 
 function render(){
   if(!isMgr()){

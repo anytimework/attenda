@@ -492,13 +492,24 @@ async function boot(){
   $('#app').style.display = 'block';
 
   // Which org does this user belong to, and as what?
-  const { data:ou, error:ouErr } = await db
-    .from('dh_org_users')
-    .select('role, org_id, dh_orgs(id,name,country_code,currency_code,timezone,hours_per_week)')
-    .limit(1).maybeSingle();
+  // dh_whoami returns exactly one row for the caller, so the app can
+  // never pick up a colleague's role by accident.
+  let who = null, ouErr = null;
+  const rpc = await db.rpc('dh_whoami');
+  if(rpc.error){
+    // fall back for projects that have not run migration 0009 yet
+    const q = await db.from('dh_org_users')
+      .select('role, org_id, dh_orgs(id,name,country_code,currency_code,timezone,hours_per_week)')
+      .eq('user_id', user.id).maybeSingle();
+    ouErr = q.error;
+    if(q.data) who = { org_id:q.data.org_id, role:q.data.role, ...q.data.dh_orgs,
+                       org_name:q.data.dh_orgs?.name };
+  } else {
+    who = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+  }
 
   if(ouErr){ $('#view').innerHTML = errBox(ouErr.message); return; }
-  if(!ou){
+  if(!who){
     $('#tabs').innerHTML = '';
     $('#view').innerHTML = `<div class="panel" style="max-width:440px;margin:0 auto">
       <div class="phead"><h2>Enter your invite code</h2>
@@ -525,11 +536,16 @@ async function boot(){
     return;
   }
 
-  S.org = ou.dh_orgs; S.role = ou.role;
+  S.org = {
+    id: who.org_id, name: who.org_name || who.name,
+    country_code: who.country_code, currency_code: who.currency_code,
+    timezone: who.timezone, hours_per_week: who.hours_per_week
+  };
+  S.role = who.role;
   $('#orgline').textContent = `${S.org.name} · ${S.org.country_code} · ${S.org.currency_code}`;
 
   const { data:me } = await db.from('dh_members')
-    .select('*').eq('user_id', user.id).maybeSingle();
+    .select('*').eq('user_id', user.id).limit(1).maybeSingle();
   S.me = me;
 
   $('#meAv').textContent   = initials(me?.full_name || user.email);
@@ -963,7 +979,8 @@ function orgForm(){
     if(error){ toast(error.message, true); return; }
     toast('Organisation updated'); closeModal();
     const { data:ou } = await db.from('dh_org_users')
-      .select('dh_orgs(id,name,country_code,currency_code,timezone,hours_per_week)').limit(1).maybeSingle();
+      .select('dh_orgs(id,name,country_code,currency_code,timezone,hours_per_week)')
+      .eq('user_id', S.user.id).maybeSingle();
     if(ou?.dh_orgs){ S.org = ou.dh_orgs;
       $('#orgline').textContent = `${S.org.name} · ${S.org.country_code} · ${S.org.currency_code}`; }
     refresh();

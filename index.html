@@ -130,10 +130,46 @@ tbody tr:hover{background:#fafcfd}
 .modal .mfoot .spacer{flex:1}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 @media(max-width:520px){.grid2{grid-template-columns:1fr}}
+.whero{background:linear-gradient(135deg,#3d8fb0,#2f7d9c);border-radius:16px;
+  padding:18px;margin-bottom:16px;color:#fff}
+.wheroL{display:flex;align-items:center;gap:14px}
+.wavatar{width:62px;height:62px;border-radius:50%;object-fit:cover;flex-shrink:0;
+  border:3px solid rgba(255,255,255,.35)}
+.wavatar.init{display:grid;place-items:center;background:rgba(255,255,255,.22);
+  font-weight:700;font-size:20px;color:#fff}
+.wavatar.big{width:96px;height:96px;border-color:var(--line);margin:0 auto}
+.wname{font-size:20px;font-weight:700;letter-spacing:-.3px}
+.wsub{font-size:13.5px;opacity:.9;margin-top:2px}
+.wstat{display:inline-block;margin-top:8px;background:rgba(255,255,255,.2);
+  border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:600}
+.wstat.good{background:rgba(255,255,255,.28)}
+.wstat.bad{background:rgba(192,57,43,.5)}
+.prow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding:14px 0;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:none}
+.pval{font-size:14.5px;font-weight:600;margin-top:3px}
 .badge{display:inline-flex;align-items:center;justify-content:center;
   min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:var(--bad);
   color:#fff;font-size:11px;font-weight:700;margin-left:6px;vertical-align:middle}
-nav.tabs button.on .badge{background:var(--brand)}
+nav.tabs button.on .whero{background:linear-gradient(135deg,#3d8fb0,#2f7d9c);border-radius:16px;
+  padding:18px;margin-bottom:16px;color:#fff}
+.wheroL{display:flex;align-items:center;gap:14px}
+.wavatar{width:62px;height:62px;border-radius:50%;object-fit:cover;flex-shrink:0;
+  border:3px solid rgba(255,255,255,.35)}
+.wavatar.init{display:grid;place-items:center;background:rgba(255,255,255,.22);
+  font-weight:700;font-size:20px;color:#fff}
+.wavatar.big{width:96px;height:96px;border-color:var(--line);margin:0 auto}
+.wname{font-size:20px;font-weight:700;letter-spacing:-.3px}
+.wsub{font-size:13.5px;opacity:.9;margin-top:2px}
+.wstat{display:inline-block;margin-top:8px;background:rgba(255,255,255,.2);
+  border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:600}
+.wstat.good{background:rgba(255,255,255,.28)}
+.wstat.bad{background:rgba(192,57,43,.5)}
+.prow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding:14px 0;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:none}
+.pval{font-size:14.5px;font-weight:600;margin-top:3px}
+.badge{background:var(--brand)}
 .appcard{background:var(--card);border:1px solid var(--line);border-radius:12px;
   padding:15px 16px;margin-bottom:11px;box-shadow:var(--sh)}
 .approw{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -292,7 +328,8 @@ function toast(msg, isErr){
 const S = { user:null, org:null, role:null, me:null, tab:'today',
             shifts:[], members:[], leave:[], contributions:[], locations:[],
             leaveTypes:[], overrides:[], openEntry:null, balances:[],
-            timesheets:[], stats:null, breakChoice:null, pending:null };
+            timesheets:[], stats:null, breakChoice:null, pending:null,
+            myChanges:[], profileChanges:[] };
 
 /* ---------------- auth ---------------- */
 $('#signInBtn').onclick = signIn;
@@ -568,7 +605,7 @@ function buildTabs(){
     : wTabs();
   if(!isMgr() && !WVIEWS[S.tab]) S.tab = 'clock';
   $('#tabs').innerHTML = tabs.map(([k,l])=>{
-    const n = k==='approvals' ? (S.pending?.leave_pending || 0) : 0;
+    const n = k==='approvals' ? (S.pending?.total ?? S.pending?.leave_pending ?? 0) : 0;
     return `<button data-t="${k}">${l}${n?`<span class="badge">${n}</span>`:''}</button>`;
   }).join('');
   $('#tabs').onclick = e => {
@@ -602,6 +639,9 @@ async function refresh(){
     q.push(db.from('dh_locations').select('*').eq('org_id',org).order('name'));
     q.push(db.from('dh_leave_types').select('*').eq('org_id',org).order('name'));
     q.push(db.from('dh_member_leave_overrides').select('*'));
+    q.push(db.from('dh_profile_changes')
+      .select('*, dh_members(full_name, photo_url)')
+      .eq('org_id',org).order('requested_at',{ascending:false}).limit(40));
   }
 
   const res = await Promise.all(q);
@@ -618,6 +658,7 @@ async function refresh(){
   S.locations = isMgr() ? (res[5].data || []) : [];
   S.leaveTypes = isMgr() ? (res[6].data || []) : [];
   S.overrides  = isMgr() ? (res[7].data || []) : [];
+  S.profileChanges = isMgr() ? (res[8]?.data || []) : [];
 
   if(isMgr()){
     const { data:pc } = await db.rpc('dh_pending_counts');
@@ -636,6 +677,9 @@ async function refresh(){
       S.timesheets = ts || [];
       const { data:st } = await db.rpc('dh_my_stats');
       S.stats = Array.isArray(st) ? st[0] : st;
+      const { data:pc } = await db.from('dh_profile_changes')
+        .select('*').eq('member_id', S.me.id).order('requested_at', { ascending:false });
+      S.myChanges = pc || [];
     }
   }
   render();
@@ -678,6 +722,14 @@ async function clockOut(breakMins){
   refresh();
 }
 
+async function decideProfile(id, approve){
+  const { error } = await db.rpc('dh_decide_profile_change',
+    { p_request:id, p_approve:approve, p_note:null });
+  if(error){ toast(error.message, true); return; }
+  toast(approve ? 'Change applied' : 'Change declined');
+  refresh();
+}
+
 async function cancelLeave(id){
   const { error } = await db.rpc('dh_cancel_leave', { p_request: id });
   if(error){ toast(error.message, true); return; }
@@ -704,6 +756,9 @@ $('#modalbg').addEventListener('click', e => {
   if(e.target.closest('[data-close]')) { closeModal(); return; }
 });
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+document.addEventListener('change', e => {
+  if(e.target.id === 'p_file') uploadPhoto(e.target.files?.[0]);
+});
 
 const fld = (id,label,val,type,extra) =>
   `<div class="field"><label for="${id}">${esc(label)}</label>
@@ -1392,7 +1447,30 @@ function vCosts(){
    ============================================================ */
 
 function wTabs(){
-  return [['clock','Clock in'],['history','History'],['wleave','Leave'],['payslip','Payslip']];
+  return [['clock','Clock in'],['history','History'],['wleave','Leave'],
+          ['payslip','Payslip'],['profile','Profile']];
+}
+
+function workerHeader(){
+  const s = S.stats || {};
+  const pct = s.on_time_pct ?? 0;
+  const tone = pct >= 90 ? 'good' : pct >= 70 ? 'warn' : 'bad';
+  const photo = S.me?.photo_url;
+  return `<div class="whero">
+    <div class="wheroL">
+      ${photo ? `<img class="wavatar" src="${esc(photo)}" alt="">`
+              : `<div class="wavatar init">${initials(S.me?.full_name||'?')}</div>`}
+      <div>
+        <div class="wname">${esc(S.me?.full_name||'')}</div>
+        <div class="wsub">${esc(S.me?.job_title||'Team member')}${
+          S.me?.employment_type ? ' · '+esc(S.me.employment_type.replace('_','-')) : ''}</div>
+        ${s.shifts_worked ? `<div class="wstat ${tone}">
+          ${pct}% on time · ${s.shifts_worked} shift${s.shifts_worked==1?'':'s'}
+          ${s.total_hours ? ' · '+s.total_hours+'h' : ''}</div>`
+          : `<div class="wstat">No shifts worked yet</div>`}
+      </div>
+    </div>
+  </div>`;
 }
 
 function vClock(){
@@ -1439,7 +1517,7 @@ function vClock(){
       <b>Nothing scheduled today</b>Enjoy the day off.</div></div>`;
   }
 
-  return `<div class="wdate">${esc(dateLine)}</div>
+  return workerHeader() + `<div class="wdate">${esc(dateLine)}</div>
     ${card}
     <p class="hint" style="text-align:center;margin:10px 4px 18px">
       Clock-in checks you are within the location's radius.</p>
@@ -1455,10 +1533,10 @@ function vClock(){
 
 function vHistory(){
   const rows = S.timesheets || [];
-  if(!rows.length) return `<h3 class="wh3">Shift history</h3>
+  if(!rows.length) return workerHeader() + `<h3 class="wh3">Shift history</h3>
     <div class="wcard"><div class="empty" style="padding:24px 8px">
       <b>No completed shifts yet</b>Your record appears here once you clock out.</div></div>`;
-  return `<h3 class="wh3">Shift history</h3>
+  return workerHeader() + `<h3 class="wh3">Shift history</h3>
     ${rows.map(r=>{
       const hrs = r.net_minutes!=null ? (r.net_minutes/60).toFixed(2)+'h' : '—';
       const late = r.late_minutes;
@@ -1480,7 +1558,7 @@ function vHistory(){
 function vWLeave(){
   const mine = S.leave.filter(l=>S.me && l.member_id===S.me.id);
   const year = new Date().getFullYear();
-  return `<h3 class="wh3">Leave balance (${year})</h3>
+  return workerHeader() + `<h3 class="wh3">Leave balance (${year})</h3>
     <div class="balgrid">
     ${S.balances.map(b=>`<div class="balcard">
       <div class="ltype">${esc(b.leave_type)}</div>
@@ -1509,8 +1587,97 @@ function vWLeave(){
          <b>No requests yet</b>Tap the button above to book time off.</div></div>`}`;
 }
 
+function vProfile(){
+  const m = S.me || {};
+  const pend = (S.myChanges||[]).filter(c=>c.status==='pending');
+  const past = (S.myChanges||[]).filter(c=>c.status!=='pending').slice(0,6);
+  const label = f => ({mobile:'Mobile', email:'Email', photo_url:'Photo', full_name:'Name'}[f]||f);
+  const pendFor = f => pend.find(c=>c.field===f);
+
+  const row = (f, val) => {
+    const p = pendFor(f);
+    return `<div class="prow">
+      <div><div class="wlab">${label(f)}</div>
+        <div class="pval">${esc(val||'—')}</div>
+        ${p?`<div class="meta" style="color:var(--warn);margin-top:4px">
+          Awaiting approval: ${esc(p.new_value||'(cleared)')}</div>`:''}</div>
+      ${p ? `<span class="pill warn">Pending</span>`
+          : `<button class="linkbtn" data-editfield="${f}">Change</button>`}
+    </div>`;
+  };
+
+  return workerHeader() + `
+    <h3 class="wh3">Your details</h3>
+    <div class="wcard" style="padding:6px 16px">
+      ${row('full_name', m.full_name)}
+      ${row('mobile', m.mobile)}
+      ${row('email', m.email)}
+    </div>
+
+    <h3 class="wh3">Photo</h3>
+    <div class="wcard" style="text-align:center">
+      ${m.photo_url ? `<img class="wavatar big" src="${esc(m.photo_url)}" alt="">`
+        : `<div class="wavatar big init">${initials(m.full_name||'?')}</div>`}
+      ${pendFor('photo_url')
+        ? `<p class="hint" style="margin-top:10px;color:var(--warn)">A new photo is waiting for approval.</p>`
+        : `<p class="hint" style="margin-top:10px">Your manager approves photo changes.</p>
+           <button class="btn pri" id="p_photo" style="margin-top:8px">Choose a photo</button>`}
+      <input type="file" id="p_file" accept="image/jpeg,image/png,image/webp" style="display:none">
+    </div>
+
+    <p class="hint" style="margin:0 0 14px">Changes to your name, contact details or photo
+      are sent to your manager. Nothing changes until they approve it.</p>
+
+    ${past.length ? `<h3 class="wh3">Past requests</h3>
+      ${past.map(c=>`<div class="wcard" style="padding:13px 15px;margin-bottom:9px">
+        <div class="approw">
+          <div><div class="name" style="font-size:14px">${label(c.field)}</div>
+            <div class="meta">${esc(c.old_value||'—')} → ${esc(c.new_value||'—')}</div>
+            ${c.note?`<div class="meta" style="margin-top:3px">"${esc(c.note)}"</div>`:''}</div>
+          ${c.status==='approved'?'<span class="pill good">Approved</span>'
+            :'<span class="pill bad">Declined</span>'}
+        </div></div>`).join('')}` : ''}`;
+}
+
+function profileFieldForm(field){
+  const m = S.me || {};
+  const label = {mobile:'Mobile', email:'Email', full_name:'Full name'}[field] || field;
+  const cur = m[field] || '';
+  modal('Change '+label.toLowerCase(), `
+    <div class="field"><label>Current</label>
+      <input value="${esc(cur)}" readonly style="background:var(--bg)"></div>
+    ${fld('pf_new','New '+label.toLowerCase(), '', field==='email'?'email':field==='mobile'?'tel':'text')}
+    <p class="hint">Your manager will review this before it takes effect.</p>`,
+    `<div class="spacer"></div>
+     <button class="btn" data-close="1">Cancel</button>
+     <button class="btn pri" id="pf_go">Send for approval</button>`);
+  $('#pf_go').onclick = async () => {
+    const v = V('pf_new');
+    if(!v){ toast('Enter a new value', true); return; }
+    const { error } = await db.rpc('dh_request_profile_change', { p_field:field, p_value:v });
+    if(error){ toast(error.message, true); return; }
+    toast('Sent for approval'); closeModal(); refresh();
+  };
+}
+
+async function uploadPhoto(file){
+  if(!file) return;
+  if(file.size > 2*1024*1024){ toast('Photo must be under 2 MB', true); return; }
+  toast('Uploading…');
+  const ext = (file.name.split('.').pop()||'jpg').toLowerCase();
+  const path = `${S.user.id}/${Date.now()}.${ext}`;
+  const { error: upErr } = await db.storage.from('avatars')
+    .upload(path, file, { upsert:true, contentType:file.type });
+  if(upErr){ toast(upErr.message, true); return; }
+  const { data:{ publicUrl } } = db.storage.from('avatars').getPublicUrl(path);
+  const { error } = await db.rpc('dh_request_profile_change',
+    { p_field:'photo_url', p_value:publicUrl });
+  if(error){ toast(error.message, true); return; }
+  toast('Photo sent for approval'); refresh();
+}
+
 function vPayslip(){
-  return `<h3 class="wh3">Payslips</h3>
+  return workerHeader() + `<h3 class="wh3">Payslips</h3>
     <p class="hint" style="margin:0 0 12px">A payslip becomes available once the month has ended.</p>
     <div class="wcard"><div class="empty" style="padding:26px 8px">
       <b>No payslips yet</b>Your payslip for a month appears here on the 1st of the following month.</div></div>`;
@@ -1542,12 +1709,14 @@ function leaveRequestForm(){
   };
 }
 
-const WVIEWS = { clock:vClock, history:vHistory, wleave:vWLeave, payslip:vPayslip };
+const WVIEWS = { clock:vClock, history:vHistory, wleave:vWLeave, payslip:vPayslip, profile:vProfile };
 
 
 function vApprovals(){
   const pending = S.leave.filter(l=>l.status==='pending');
-  const recent  = S.leave.filter(l=>l.status!=='pending').slice(0,8);
+  const recent  = S.leave.filter(l=>l.status!=='pending')
+    .slice().sort((a,b)=> new Date(b.decided_at||b.starts_on) - new Date(a.decided_at||a.starts_on))
+    .slice(0,8);
   const stale   = S.shifts.filter(s=>s.status==='scheduled'
     && s.shift_date < new Date().toISOString().slice(0,10));
 
@@ -1559,6 +1728,9 @@ function vApprovals(){
     <div class="card"><div class="k">Unworked shifts</div>
       <div class="v" style="color:${stale.length?'var(--bad)':'inherit'}">${stale.length}</div>
       <div class="vsub">past date, never clocked in</div></div>
+    <div class="card"><div class="k">Profile changes</div>
+      <div class="v" style="color:${S.profileChanges.filter(c=>c.status==='pending').length?'var(--warn)':'inherit'}">${S.profileChanges.filter(c=>c.status==='pending').length}</div>
+      <div class="vsub">contact or photo edits</div></div>
     <div class="card"><div class="k">Invites outstanding</div>
       <div class="v">${S.pending?.invites_pending ?? 0}</div>
       <div class="vsub">codes not yet used</div></div>
@@ -1586,6 +1758,32 @@ function vApprovals(){
       : `<div class="empty"><b>Nothing waiting</b>New leave requests appear here.</div>`}
     </div>
   </div>
+
+  ${(() => {
+    const pc = S.profileChanges.filter(c=>c.status==='pending');
+    if(!pc.length) return '';
+    const label = f => ({mobile:'Mobile', email:'Email', photo_url:'Photo', full_name:'Name'}[f]||f);
+    return `<div class="panel"><div class="phead"><h2>Profile changes</h2>
+      <p>Contact detail and photo changes requested by your team. Nothing is applied until you approve it.</p></div>
+      <div class="pbody" style="padding-top:14px">
+      ${pc.map(c=>`<div class="appcard"><div class="approw">
+        <div style="flex:1;min-width:190px">
+          <div class="rowflex">
+            ${c.field==='photo_url' && c.new_value
+              ? `<img class="wavatar" style="width:42px;height:42px;border-width:2px" src="${esc(c.new_value)}" alt="">`
+              : `<div class="av">${initials(c.dh_members?.full_name)}</div>`}
+            <div><div class="name">${esc(c.dh_members?.full_name||'')}</div>
+              <div class="meta">${label(c.field)}</div></div></div>
+          ${c.field!=='photo_url' ? `<div class="meta" style="margin-top:8px">
+            ${esc(c.old_value||'—')} → <b>${esc(c.new_value||'—')}</b></div>` : ''}
+        </div>
+        <div class="rowflex">
+          <button class="btn sm good" data-pcok="${c.id}">Approve</button>
+          <button class="btn sm bad" data-pcno="${c.id}">Decline</button>
+        </div>
+      </div></div>`).join('')}
+      </div></div>`;
+  })()}
 
   ${stale.length ? `<div class="panel"><div class="phead"><h2>Shifts never worked</h2>
     <p>Scheduled for a past date with no clock-in. Mark them or delete them.</p></div>
@@ -1646,6 +1844,14 @@ $('#view').addEventListener('click', e => {
   if(et){ leaveTypeForm(S.leaveTypes.find(t=>t.id===et.dataset.editlt)); return; }
   const ds = e.target.closest('[data-delshift]');
   if(ds){ deleteShift(ds.dataset.delshift); return; }
+
+  const ef = e.target.closest('[data-editfield]');
+  if(ef){ profileFieldForm(ef.dataset.editfield); return; }
+  if(e.target.closest('#p_photo')){ $('#p_file').click(); return; }
+  const ok = e.target.closest('[data-pcok]');
+  if(ok){ decideProfile(ok.dataset.pcok, true); return; }
+  const no = e.target.closest('[data-pcno]');
+  if(no){ decideProfile(no.dataset.pcno, false); return; }
 
   const bk = e.target.closest('[data-brk]');
   if(bk){ S.breakChoice = +bk.dataset.brk; render(); return; }

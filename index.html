@@ -130,6 +130,41 @@ tbody tr:hover{background:#fafcfd}
 .modal .mfoot .spacer{flex:1}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 @media(max-width:520px){.grid2{grid-template-columns:1fr}}
+.wdate{font-size:14px;font-weight:600;color:var(--muted);margin:2px 0 12px}
+.wcard{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:17px;box-shadow:var(--sh);margin-bottom:12px}
+.wrow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.wtime{font-size:20px;font-weight:700;letter-spacing:-.3px}
+.wmeta{font-size:13px;color:var(--muted);margin-top:3px}
+.whrs{font-size:17px;font-weight:700;color:var(--brand)}
+.wgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.wbox{background:var(--bg);border-radius:10px;padding:11px 13px}
+.wlab{font-size:11.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.4px}
+.wval{font-size:16px;font-weight:600;margin-top:3px;font-family:'DM Mono',monospace}
+.brkrow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.brk{padding:12px 4px;border:1px solid var(--line);border-radius:10px;background:var(--card);
+  font-size:14px;font-weight:600;color:var(--muted)}
+.brk.on{background:var(--brandSoft);border-color:var(--brand);color:var(--brand)}
+.wbtn{width:100%;padding:15px;border-radius:12px;font-size:16px;font-weight:700;
+  margin-top:14px;color:#fff;background:var(--good)}
+.wbtn.out{background:var(--bad)}
+.wbtn.pri{background:var(--brand);margin-top:0}
+.wh3{font-size:15.5px;font-weight:700;margin:4px 0 11px}
+.ucard{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:13px 15px;margin-bottom:9px;display:flex;gap:15px;align-items:center}
+.udate{text-align:center;min-width:44px;border-right:1px solid var(--line);padding-right:14px}
+.udow{font-size:10.5px;font-weight:700;color:var(--brand);letter-spacing:.5px}
+.udd{font-size:21px;font-weight:700;line-height:1.1}
+.umon{font-size:10.5px;color:var(--faint);font-weight:600}
+.inout{font-size:12.5px;background:var(--bg);border-radius:8px;padding:6px 10px;
+  font-family:'DM Mono',monospace}
+.balgrid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+@media(max-width:420px){.balgrid{grid-template-columns:1fr}}
+.balcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px}
+.ltype{font-size:13.5px;font-weight:600}
+.lbig{font-size:27px;font-weight:700;margin-top:5px;letter-spacing:-.5px}
+.lsm{font-size:14px;font-weight:500;color:var(--faint)}
+.lused{font-size:12px;color:var(--muted);margin-top:2px}
 .secthead{font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;
   letter-spacing:.6px;margin:16px 0 9px;padding-bottom:5px;border-bottom:1px solid var(--line)}
 .secthead:first-child{margin-top:0}
@@ -249,7 +284,8 @@ function toast(msg, isErr){
 /* ---------------- state ---------------- */
 const S = { user:null, org:null, role:null, me:null, tab:'today',
             shifts:[], members:[], leave:[], contributions:[], locations:[],
-            leaveTypes:[], overrides:[], openEntry:null, balances:[] };
+            leaveTypes:[], overrides:[], openEntry:null, balances:[],
+            timesheets:[], stats:null, breakChoice:null };
 
 /* ---------------- auth ---------------- */
 $('#signInBtn').onclick = signIn;
@@ -505,7 +541,8 @@ const isMgr = () => ['owner','admin','manager'].includes(S.role);
 function buildTabs(){
   const tabs = isMgr()
     ? [['today','Today'],['team','Team'],['shifts','Shifts'],['timesheets','Timesheets'],['leave','Leave'],['costs','Costs'],['setup','Setup']]
-    : [['today','Today'],['shifts','My shifts'],['leave','My leave']];
+    : wTabs();
+  if(!isMgr() && !WVIEWS[S.tab]) S.tab = 'clock';
   $('#tabs').innerHTML = tabs.map(([k,l])=>`<button data-t="${k}">${l}</button>`).join('');
   $('#tabs').onclick = e => {
     const b = e.target.closest('button[data-t]'); if(!b) return;
@@ -531,6 +568,7 @@ async function refresh(){
     db.from('dh_time_entries')
       .select('*').eq('org_id',org).is('clock_out_at',null)
   ];
+  if(!isMgr()) q.push(db.from('dh_leave_types').select('*').eq('org_id',org).order('name'));
   if(isMgr()){
     q.push(db.from('dh_members').select('*, dh_locations(name)').eq('org_id',org).order('full_name'));
     q.push(db.from('dh_contributions').select('*').eq('org_id',org).order('sort_order'));
@@ -547,6 +585,7 @@ async function refresh(){
   S.leave  = res[1].data || [];
   const open = res[2].data || [];
   S.openEntry = S.me ? open.find(e=>e.member_id===S.me.id) || null : null;
+  if(!isMgr()) S.leaveTypes = res[3]?.data || [];
   S.members  = isMgr() ? (res[3].data || []) : [];
   S.contributions = isMgr() ? (res[4].data || []) : [];
   S.locations = isMgr() ? (res[5].data || []) : [];
@@ -557,6 +596,15 @@ async function refresh(){
     const { data:bal } = await db.from('dh_leave_balances')
       .select('*').eq('member_id', S.me.id);
     S.balances = bal || [];
+    if(!isMgr()){
+      const { data:ts } = await db.from('dh_timesheet_rows')
+        .select('*').eq('member_id', S.me.id)
+        .not('clock_out_at','is',null)
+        .order('clock_in_at', { ascending:false }).limit(30);
+      S.timesheets = ts || [];
+      const { data:st } = await db.rpc('dh_my_stats');
+      S.stats = Array.isArray(st) ? st[0] : st;
+    }
   }
   render();
 }
@@ -586,14 +634,22 @@ async function clockIn(shiftId){
   refresh();
 }
 
-async function clockOut(){
+async function clockOut(breakMins){
   const p = await position();
   const { error } = await db.rpc('dh_clock_out', {
-    p_member:S.me.id, p_lat:p?.lat ?? null, p_lng:p?.lng ?? null
+    p_member:S.me.id, p_lat:p?.lat ?? null, p_lng:p?.lng ?? null,
+    p_break: breakMins ?? 0
   });
   if(error){ toast(error.message, true); return; }
   toast('Clocked out');
+  S.breakChoice = null;
   refresh();
+}
+
+async function cancelLeave(id){
+  const { error } = await db.rpc('dh_cancel_leave', { p_request: id });
+  if(error){ toast(error.message, true); return; }
+  toast('Request cancelled'); refresh();
 }
 
 async function decideLeave(id, approve){
@@ -1300,9 +1356,174 @@ function vCosts(){
   </tbody></table></div></div>`;
 }
 
+
+/* ============================================================
+   Worker view — a distinct experience, not a trimmed manager one.
+   Clock in, history, leave, payslip.
+   ============================================================ */
+
+function wTabs(){
+  return [['clock','Clock in'],['history','History'],['wleave','Leave'],['payslip','Payslip']];
+}
+
+function vClock(){
+  const today = new Date().toISOString().slice(0,10);
+  const mine = S.shifts.filter(s=>S.me && s.member_id===S.me.id);
+  const todays = mine.find(s=>s.shift_date===today && s.status!=='completed');
+  const upcoming = mine.filter(s=>s.shift_date>today && s.status==='scheduled').slice(0,6);
+  const brk = S.breakChoice ?? (todays?.break_minutes ?? 0);
+
+  const dateLine = new Date().toLocaleDateString([], {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+
+  let card;
+  if(S.openEntry){
+    card = `<div class="wcard">
+      <div class="wrow"><div class="wtime">${hhmm(S.openEntry.clock_in_at)} &rarr; now</div>
+        <span class="pill good">On shift</span></div>
+      <div class="wmeta">${esc(todays?.dh_locations?.name || 'Working')}</div>
+      <div class="wgrid">
+        <div class="wbox"><div class="wlab">Clock in</div><div class="wval">${hhmm(S.openEntry.clock_in_at)}</div></div>
+        <div class="wbox"><div class="wlab">Clock out</div><div class="wval">—</div></div>
+      </div>
+      <div class="wlab" style="margin:14px 0 7px">Break taken</div>
+      <div class="brkrow">${[0,30,60,90].map(n=>
+        `<button class="brk${brk===n?' on':''}" data-brk="${n}">${n}m</button>`).join('')}</div>
+      <button class="wbtn out" id="w_out">Clock out</button>
+    </div>`;
+  } else if(todays){
+    card = `<div class="wcard">
+      <div class="wrow"><div class="wtime">${hhmm(todays.starts_at)} – ${hhmm(todays.ends_at)}</div>
+        <span class="pill grey">Scheduled</span></div>
+      <div class="wmeta">${esc(todays.dh_locations?.name || 'No location')}${
+        todays.break_minutes?` · ${todays.break_minutes}m break`:''}</div>
+      <div class="wgrid">
+        <div class="wbox"><div class="wlab">Clock in</div><div class="wval">—</div></div>
+        <div class="wbox"><div class="wlab">Clock out</div><div class="wval">—</div></div>
+      </div>
+      <div class="wlab" style="margin:14px 0 7px">Break taken</div>
+      <div class="brkrow">${[0,30,60,90].map(n=>
+        `<button class="brk${brk===n?' on':''}" data-brk="${n}">${n}m</button>`).join('')}</div>
+      <button class="wbtn in" data-ci="${todays.id}">Clock in</button>
+    </div>`;
+  } else {
+    card = `<div class="wcard"><div class="empty" style="padding:22px 8px">
+      <b>Nothing scheduled today</b>Enjoy the day off.</div></div>`;
+  }
+
+  return `<div class="wdate">${esc(dateLine)}</div>
+    ${card}
+    <p class="hint" style="text-align:center;margin:10px 4px 18px">
+      Clock-in checks you are within the location's radius.</p>
+    ${upcoming.length ? `<h3 class="wh3">Upcoming shifts</h3>
+      ${upcoming.map(s=>`<div class="ucard">
+        <div class="udate"><div class="udow">${new Date(s.shift_date).toLocaleDateString([], {weekday:'short'}).toUpperCase()}</div>
+          <div class="udd">${new Date(s.shift_date).getDate()}</div>
+          <div class="umon">${new Date(s.shift_date).toLocaleDateString([], {month:'short'}).toUpperCase()}</div></div>
+        <div><div class="wtime" style="font-size:15px">${hhmm(s.starts_at)} – ${hhmm(s.ends_at)}</div>
+          <div class="wmeta">${esc(s.dh_locations?.name||'—')}${s.break_minutes?` · ${s.break_minutes}m break`:''}</div></div>
+      </div>`).join('')}` : ''}`;
+}
+
+function vHistory(){
+  const rows = S.timesheets || [];
+  if(!rows.length) return `<h3 class="wh3">Shift history</h3>
+    <div class="wcard"><div class="empty" style="padding:24px 8px">
+      <b>No completed shifts yet</b>Your record appears here once you clock out.</div></div>`;
+  return `<h3 class="wh3">Shift history</h3>
+    ${rows.map(r=>{
+      const hrs = r.net_minutes!=null ? (r.net_minutes/60).toFixed(2)+'h' : '—';
+      const late = r.late_minutes;
+      const tag = late==null ? ''
+        : late > 5 ? `<span class="pill bad">Late ${late}m</span>`
+        : `<span class="pill good">On time</span>`;
+      return `<div class="wcard" style="margin-bottom:11px">
+        <div class="wrow"><div class="wtime" style="font-size:15.5px">${dmy(r.shift_date || r.clock_in_at)}</div>
+          <div class="whrs">${hrs}</div></div>
+        <div class="wmeta">${esc(r.location_name||'—')}${r.scheduled_start
+          ? ` · scheduled ${hhmm(r.scheduled_start)}–${hhmm(r.scheduled_end)}`:''}${
+            r.break_minutes?` · ${r.break_minutes}m break`:''}</div>
+        <div class="wrow" style="margin-top:9px;gap:8px">
+          <span class="inout">In ${hhmm(r.clock_in_at)} &rarr; Out ${hhmm(r.clock_out_at)}</span>${tag}
+        </div></div>`;
+    }).join('')}`;
+}
+
+function vWLeave(){
+  const mine = S.leave.filter(l=>S.me && l.member_id===S.me.id);
+  const year = new Date().getFullYear();
+  return `<h3 class="wh3">Leave balance (${year})</h3>
+    <div class="balgrid">
+    ${S.balances.map(b=>`<div class="balcard">
+      <div class="ltype">${esc(b.leave_type)}</div>
+      ${b.days_allowed > 0
+        ? `<div class="lbig">${b.days_remaining}<span class="lsm"> / ${b.days_allowed} left</span></div>
+           <div class="lused">${b.days_taken} used</div>`
+        : `<div class="lbig" style="font-size:19px;color:var(--brand)">Unpaid</div>
+           <div class="lused">${b.days_taken} taken</div>`}
+    </div>`).join('')}
+    </div>
+    <button class="wbtn pri" id="w_req" style="margin:14px 0 18px">+ Request leave</button>
+    <h3 class="wh3">My requests</h3>
+    ${mine.length ? mine.map(l=>`<div class="wcard" style="margin-bottom:10px">
+      <div class="wrow">
+        <div><div class="wtime" style="font-size:15px">${esc(l.dh_leave_types?.name||'Leave')}</div>
+          <div class="wmeta">${dmy(l.starts_on)}${l.days_count>1?' → '+dmy(l.ends_on):''} · ${l.days_count}d</div></div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        ${l.status==='approved'?'<span class="pill good">Approved</span>'
+          :l.status==='declined'?'<span class="pill bad">Declined</span>'
+          :l.status==='cancelled'?'<span class="pill grey">Cancelled</span>'
+          :'<span class="pill warn">Pending</span>'}
+        ${l.status==='pending'?`<button class="linkbtn danger" data-cancelleave="${l.id}">Cancel</button>`:''}
+        </div>
+      </div></div>`).join('')
+      : `<div class="wcard"><div class="empty" style="padding:20px 8px">
+         <b>No requests yet</b>Tap the button above to book time off.</div></div>`}`;
+}
+
+function vPayslip(){
+  return `<h3 class="wh3">Payslips</h3>
+    <p class="hint" style="margin:0 0 12px">A payslip becomes available once the month has ended.</p>
+    <div class="wcard"><div class="empty" style="padding:26px 8px">
+      <b>No payslips yet</b>Your payslip for a month appears here on the 1st of the following month.</div></div>`;
+}
+
+function leaveRequestForm(){
+  const types = S.leaveTypes.length ? S.leaveTypes
+    : S.balances.map(b=>({id:b.leave_type_id, name:b.leave_type}));
+  if(!types.length){ toast('No leave types set up yet', true); return; }
+  const today = new Date().toISOString().slice(0,10);
+  modal('Request leave', `
+    ${sel('rq_type','Leave type','',types.map(t=>[t.id,t.name]))}
+    <div class="grid2">
+      ${fld('rq_from','From', today, 'date')}
+      ${fld('rq_to','To', today, 'date')}
+    </div>
+    <div class="field"><label for="rq_why">Reason (optional)</label>
+      <input id="rq_why" type="text" placeholder="Family trip"></div>
+    <p class="hint">Your manager will be notified and can approve or decline.</p>`,
+    `<div class="spacer"></div>
+     <button class="btn" data-close="1">Cancel</button>
+     <button class="btn pri" id="rq_go">Send request</button>`);
+  $('#rq_go').onclick = async () => {
+    const { error } = await db.rpc('dh_request_leave', {
+      p_type: V('rq_type'), p_from: V('rq_from'), p_to: V('rq_to'), p_reason: V('rq_why')
+    });
+    if(error){ toast(error.message, true); return; }
+    toast('Leave requested'); closeModal(); refresh();
+  };
+}
+
+const WVIEWS = { clock:vClock, history:vHistory, wleave:vWLeave, payslip:vPayslip };
+
 const VIEWS = { today:vToday, shifts:vShifts, team:vTeam, timesheets:vTimesheets, leave:vLeave, costs:vCosts, setup:vSetup };
 
 function render(){
+  if(!isMgr()){
+    document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===S.tab));
+    const fn = WVIEWS[S.tab] || vClock;
+    $('#view').innerHTML = fn();
+    return;
+  }
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===S.tab));
   const fn = VIEWS[S.tab] || vToday;
   $('#view').innerHTML = fn();
@@ -1333,6 +1554,13 @@ $('#view').addEventListener('click', e => {
   if(et){ leaveTypeForm(S.leaveTypes.find(t=>t.id===et.dataset.editlt)); return; }
   const ds = e.target.closest('[data-delshift]');
   if(ds){ deleteShift(ds.dataset.delshift); return; }
+
+  const bk = e.target.closest('[data-brk]');
+  if(bk){ S.breakChoice = +bk.dataset.brk; render(); return; }
+  if(e.target.closest('#w_out')){ clockOut(S.breakChoice ?? 0); return; }
+  if(e.target.closest('#w_req')){ leaveRequestForm(); return; }
+  const cl = e.target.closest('[data-cancelleave]');
+  if(cl){ cancelLeave(cl.dataset.cancelleave); return; }
 
   const ci = e.target.closest('[data-ci]');
   if(ci){ clockIn(ci.dataset.ci); return; }

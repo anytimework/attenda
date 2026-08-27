@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8">
   <title>Attenda Workforce Portal</title>
+  <script>
+    try {
+      const requestedLanguage = new URLSearchParams(window.location.search).get('lang');
+      if (['en', 'zh', 'ja'].includes(requestedLanguage)) {
+        localStorage.setItem('attenda_lang', requestedLanguage);
+      }
+    } catch (error) {}
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #faf9f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }

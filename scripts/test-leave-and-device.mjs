@@ -91,3 +91,23 @@ if(process.env.ATTENDA_PREVIEW){
  a=fresh();a.org.leaves=[leave('reserved','a','2026-10-31'),leave('range','b','2026-11-05','2026-11-12','pending')];a.state.draft={lfrom:'2026-10-29',lto:'2026-10-31'};
  fs.writeFileSync(process.env.ATTENDA_PREVIEW,'<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Attenda leave preview</title><style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f1f5f9;color:#17202a;margin:0;padding:24px}main{max-width:1100px;margin:auto}section{margin-bottom:32px}h1{font-size:25px}h2{font-size:18px}button,input,select{font-family:inherit}</style><main><h1>Attenda · Leave</h1><section style="max-width:620px"><h2>Worker: overlapping dates</h2>'+render(a.wLeave())+'</section><section><h2>Employer: approve each day</h2>'+render(a.tLeave())+'</section></main>');
 }
+// Every added message has explicit translations, including dialogs and interpolation.
+context.I18N={zh:{approved:'已批准',rejected:'已拒绝'},'zh-Hant':{approved:'已批准',rejected:'已拒絕'},ja:{approved:'承認済み',rejected:'却下'}};
+const translationBlock=template.slice(template.indexOf('const LEAVE_DEVICE_I18N='),template.indexOf('class Component extends DCLogic'));
+vm.runInContext(translationBlock+'\nglobalThis.newMessages=LEAVE_DEVICE_I18N;',context);
+for(const [key,langs] of Object.entries(context.newMessages)){
+ const slots=s=>[...s.matchAll(/\{(\w+)\}/g)].map(m=>m[1]).sort().join(',');
+ for(const lang of ['zh','zh-Hant','ja']){assert.ok(langs[lang]);assert.notEqual(langs[lang],key);assert.equal(slots(langs[lang]),slots(key));}
+}
+for(const lang of ['zh','zh-Hant','ja']){
+ a=fresh();a.state.lang=lang;a.t=context.App.prototype.t;
+ a.org.leaves=[leave('reserved','a','2026-10-31')];a.state.draft={lfrom:'2026-10-29',lto:'2026-10-31'};
+ let view=JSON.stringify(a.wLeave());assert.ok(view.includes(context.I18N[lang]['Submit with urgent appeal']));assert.ok(view.includes(context.I18N[lang]['on leave']));assert.ok(!view.includes('Revise your dates or submit'));
+ await a.submitLeave('normal');assert.equal(a.message,context.I18N[lang]['Some dates overlap. Submit only clear dates, or add an urgent reason to appeal.']);
+ a.state.draft.lappealReason='Family emergency';await a.submitLeave('appeal');assert.ok(!a.message.includes('{count}'));assert.ok(!a.message.includes('Sent '));
+ let dialog='';context.window.confirm=message=>{dialog=message;return false;};const entry=a.leaveEntries().find(x=>x.appeal);
+ await a.decideLeave(entry.id,'approved');assert.ok(dialog.includes('Family emergency'));assert.ok(dialog.includes('Niro'));assert.ok(!dialog.includes('Approve urgent'));
+ let prompt='';context.window.prompt=message=>{prompt=message;return '';};await a.workerLeaveDay(entry.id,true);assert.equal(prompt,context.I18N[lang]['Explain the urgent reason for appealing this day:']);
+ assert.ok(!a.activityText({messageKey:'Leave {status}: {name} {date}{appeal}',messageValues:{status:'approved',name:'Niro',date:'2026-10-31',appeal:' (urgent appeal)'}}).includes('urgent appeal'));
+}
+console.log('Passed: all 41 new messages in Simplified Chinese, Traditional Chinese and Japanese; interpolation, visible controls, toasts, native confirmation/prompt dialogs and activity text.');

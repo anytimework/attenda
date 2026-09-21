@@ -14,3 +14,5 @@ Refresh open employer and worker sessions after deployment. Older loaded clients
 Device recovery still requires a surviving browser identity. If all site data is erased, or a different browser is used, a new device approval is necessary. No worker's account was reset and no leave was approved as part of the release.
 
 Run `node scripts/test-leave-and-device.mjs`. Coverage includes overlap options, urgent appeals, same-worker duplicates, invalid and leap-year dates, historical ranges, daily decisions, recalls, shift cancellation, year boundaries, offline handling, device backup recovery, stale-device approvals and concurrent saves. Rendering checks use the real view methods with test fixtures; no production leave requests are created.
+
+All 41 added device/leave messages have explicit Simplified Chinese, Traditional Chinese and Japanese translations alongside English. This includes interpolation, native dialogs and activity entries. Translation regression tests verify placeholder parity and localized flows. Traditional Chinese date formatting uses zh-TW.

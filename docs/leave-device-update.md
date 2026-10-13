@@ -16,3 +16,11 @@ Device recovery still requires a surviving browser identity. If all site data is
 Run `node scripts/test-leave-and-device.mjs`. Coverage includes overlap options, urgent appeals, same-worker duplicates, invalid and leap-year dates, historical ranges, daily decisions, recalls, shift cancellation, year boundaries, offline handling, device backup recovery, stale-device approvals and concurrent saves. Rendering checks use the real view methods with test fixtures; no production leave requests are created.
 
 All 41 added device/leave messages have explicit Simplified Chinese, Traditional Chinese and Japanese translations alongside English. This includes interpolation, native dialogs and activity entries. Translation regression tests verify placeholder parity and localized flows. Traditional Chinese date formatting uses zh-TW.
+
+## 13 October: recurring schedule renewal and slow device storage
+
+Recurring schedules now append missing shifts across a rolling 56-day window at sign-in, restored sessions and successful foreground refreshes. Existing shifts (including cancelled shifts), attendance, approved leave, inactive employees and configured end dates are respected. Worker sessions maintain only their own schedule; administrators maintain active employees' schedules. The renewal is idempotent and uses stable employee/date IDs.
+
+Device startup keeps a delayed IndexedDB read alive after the two-second UI startup timeout and does not write over the unread backup. A late backup is trusted for an existing worker only when it matches the approved device. Regression coverage exercises timeout recovery and unrelated-device rejection.
+
+McBilly's active account had a saved weekday 07:00–16:00 schedule whose generated eight-week batch ended on 9 October. On 13 October, 40 missing upcoming scheduled shifts were restored with a conditional cloud write and verified by rereading. No attendance times, historical shifts or November cover shifts were altered. The code changes in this section await deployment approval.

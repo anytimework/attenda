@@ -111,3 +111,21 @@ for(const lang of ['zh','zh-Hant','ja']){
  assert.ok(!a.activityText({messageKey:'Leave {status}: {name} {date}{appeal}',messageValues:{status:'approved',name:'Niro',date:'2026-10-31',appeal:' (urgent appeal)'}}).includes('urgent appeal'));
 }
 console.log('Passed: all 41 new messages in Simplified Chinese, Traditional Chinese and Japanese; interpolation, visible controls, toasts, native confirmation/prompt dialogs and activity text.');
+// Rolling schedules append missing dates without regenerating existing attendance.
+a=fresh();a.todayStr=()=> '2026-10-13';a.emp.sched={on:true,patterns:[{days:['mon','tue','wed','thu','fri'],start:'07:00',end:'16:00',break:60}],endDate:''};
+a.org.shifts=[{id:'past',empId:'b',date:'2026-10-09',clockIn:'recorded'},{id:'manual',empId:'b',date:'2026-10-14',start:'10:00'},{id:'cancelled',empId:'b',date:'2026-10-15',cancelled:true}];
+a.org.leaves=[leave('approved','b','2026-10-16')];const original=JSON.stringify(a.org.shifts);
+assert.equal(a.ensureRecurringSchedules(),true);assert.equal(JSON.stringify(a.org.shifts.slice(0,3)),original);
+assert.equal(a.org.shifts.filter(s=>s.date==='2026-10-14').length,1);assert.equal(a.org.shifts.filter(s=>s.date==='2026-10-15').length,1);
+assert.equal(a.org.shifts.some(s=>s.date==='2026-10-16'),false);assert.equal(a.ensureRecurringSchedules(),false);
+const before=a.org.shifts.length;a.todayStr=()=> '2026-10-20';assert.equal(a.ensureRecurringSchedules(),true);assert.equal(a.org.shifts.length,before+5);
+a=fresh();a.todayStr=()=> '2026-10-13';a.emp.sched={on:true,patterns:[{days:['mon','tue','wed','thu','fri'],start:'07:00',end:'16:00'}],endDate:'2026-10-14'};a.ensureRecurringSchedules();assert.equal(a.org.shifts.length,2);
+a.emp.active=false;a.org.shifts=[];assert.equal(a.ensureRecurringSchedules(),false);
+a=fresh();a.todayStr=()=> '2026-10-13';a.org.employees[0].sched={on:true,patterns:[{days:['tue'],start:'07:00',end:'16:00'}]};assert.equal(a.ensureRecurringSchedules(),false,'Worker session does not generate someone else’s shifts');
+// A delayed backup must remain readable after the startup timeout.
+a=fresh();local.clear();cookie.clear();a.emp.device={fp:'dev2_slowbackup'};a.legacyFp=()=> 'dev_old';let resolveBackup;const writes=[];
+a.idbGetDeviceId=()=>new Promise(resolve=>{resolveBackup=resolve;});a.idbSetDeviceId=id=>writes.push(id);
+await a.initDeviceId();assert.equal(a._deviceBackupPending,true);assert.equal(writes.length,0,'Do not overwrite unread backup');
+resolveBackup('dev2_slowbackup');await new Promise(resolve=>setTimeout(resolve,0));assert.equal(a.fp(),'dev2_slowbackup');assert.equal(a.deviceOk(a.emp),true);
+assert.ok(writes.every(id=>id==='dev2_slowbackup'));assert.equal(a.deviceOk({device:{fp:'dev2_other'}}),false);
+console.log('Passed: rolling horizon renewal, existing/manual/cancelled shifts, leave, end dates, inactive staff, worker scope and delayed device-backup recovery.');
